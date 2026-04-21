@@ -877,7 +877,6 @@ function StatsScreen({ onClose }) {
                         <div style={{ fontSize: "8px", color: "#3a4a5a" }}>Heavy Lifter</div>
                       </div>
                       <div style={{ fontSize: "8px", color: "#5a6a7a", textAlign: "center", marginTop: "4px", fontStyle: "italic" }}>% of team tricks taken. 50% = even split with partner.</div>
-                      </div>
                     </div>
                   )}
 
