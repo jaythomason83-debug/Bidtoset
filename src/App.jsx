@@ -740,6 +740,7 @@ function HistoryScreen({ onClose }) {
                         <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[0] : team.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks{(p1n > 0 && parseInt(re.p1tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                         <div style={{ color: p2n === 2 ? BLUE : p2n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[1] : team.p[1]}: {p2n === 2 ? "Blind Nil" : p2n === 1 ? "Nil" : "bid " + re.p2bid} - {re.p2tricks} tricks{(p2n > 0 && parseInt(re.p2tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                         <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
+                        {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                       </div>
                     );
@@ -1374,6 +1375,7 @@ export default function App() {
         entry: s.entry.map(function(e) { return Object.assign({}, e); }),
         results: results,
         after: newTeams.map(function(t) { return t.score; }),
+        penalties: newTeams.map(function(t, i) { var b = s.teams[i].bags + results[i].bags; var p = 0; while (b >= rules.bagLimit) { b -= rules.bagLimit; p += rules.bagPenalty; } return p; }),
         snap: s.teams.map(function(t) { return { name: t.name, p: [t.p[0], t.p[1]] }; }),
       };
 
@@ -1580,7 +1582,8 @@ export default function App() {
                                   return <div key={li} style={{ color: isBad ? ORANGE : isBlind ? BLUE : GREEN, fontSize: "10px" }}>{l}</div>;
                                 })}
                                 <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
-                                <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
+                                {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
+                        <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                               </div>
                             );
                           })}
