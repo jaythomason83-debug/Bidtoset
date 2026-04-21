@@ -1013,7 +1013,7 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
         {/* Show Instructions toggle */}
         <button onClick={function() {
           try { localStorage.removeItem("bidtoset_onboarded_v1"); } catch(_) {}
-          if (onShowInstructions) onShowInstructions(); onClose();
+          onClose(); setTimeout(function() { if (onShowInstructions) onShowInstructions(); }, 100);
         }} style={{ marginTop: "16px", width: "100%", background: "transparent", color: "#6a7a8a", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
           Show Instructions
         </button>
