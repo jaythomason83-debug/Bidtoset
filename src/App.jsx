@@ -1013,7 +1013,7 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
         {/* Show Instructions toggle */}
         <button onClick={function() {
           try { localStorage.removeItem("bidtoset_onboarded_v1"); } catch(_) {}
-          onClose(); setTimeout(function() { if (onShowInstructions) onShowInstructions(); }, 100);
+          try { localStorage.setItem("bidtoset_show_instructions", "1"); } catch(_) {} onClose();
         }} style={{ marginTop: "16px", width: "100%", background: "transparent", color: "#6a7a8a", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
           Show Instructions
         </button>
@@ -1302,6 +1302,14 @@ export default function App() {
   const [showSummary, setShowSummary] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(!hasOnboarded());
 
+  useEffect(function() {
+    if (screen === "game") {
+      try {
+        var flag = localStorage.getItem("bidtoset_show_instructions");
+        if (flag) { localStorage.removeItem("bidtoset_show_instructions"); setShowOnboarding(true); }
+      } catch(_) {}
+    }
+  }, [screen]);
   useEffect(function() {
     save(gs);
     setSavedFlash(true);
