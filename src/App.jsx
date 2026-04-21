@@ -737,8 +737,8 @@ function HistoryScreen({ onClose }) {
                     return (
                       <div key={i} style={{ flex: 1, textAlign: "center", fontSize: "11px", background: wasSet ? "rgba(232,148,58,0.07)" : "rgba(255,255,255,0.02)", border: "1px solid " + (wasSet ? "rgba(232,148,58,0.15)" : "rgba(255,255,255,0.04)"), borderRadius: "8px", padding: "8px" }}>
                         <div style={{ color: wasSet ? ORANGE : GOLD, marginBottom: "4px", fontWeight: "bold" }}>{nm.name || nm}{wasSet ? " (SET)" : ""}</div>
-                        <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[0] : team.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks</div>
-                        <div style={{ color: p2n === 2 ? BLUE : p2n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[1] : team.p[1]}: {p2n === 2 ? "Blind Nil" : p2n === 1 ? "Nil" : "bid " + re.p2bid} - {re.p2tricks} tricks</div>
+                        <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[0] : team.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks{(p1n > 0 && parseInt(re.p1tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
+                        <div style={{ color: p2n === 2 ? BLUE : p2n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[1] : team.p[1]}: {p2n === 2 ? "Blind Nil" : p2n === 1 ? "Nil" : "bid " + re.p2bid} - {re.p2tricks} tricks{(p2n > 0 && parseInt(re.p2tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                         <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                       </div>
@@ -1571,7 +1571,7 @@ export default function App() {
                             return (
                               <div key={i} style={{ flex: 1, textAlign: "center", fontSize: "11px", background: wasSet ? "rgba(232,148,58,0.07)" : "rgba(255,255,255,0.02)", border: "1px solid " + (wasSet ? "rgba(232,148,58,0.15)" : "rgba(255,255,255,0.04)"), borderRadius: "8px", padding: "8px" }}>
                                 <div style={{ color: wasSet ? ORANGE : GOLD, marginBottom: "4px", fontWeight: "bold" }}>{nm.name}{wasSet ? " (SET)" : ""}</div>
-                                <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks</div>
+                                <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks{(p1n > 0 && parseInt(re.p1tricks) > 0) ? " ❌ NIL FAILED" : ""}{(p1n > 0 && parseInt(re.p1tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                                 <div style={{ color: p2n === 2 ? BLUE : p2n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p[1]}: {p2n === 2 ? "Blind Nil" : p2n === 1 ? "Nil" : "bid " + re.p2bid} - {re.p2tricks} tricks</div>
                                 {!(p1n > 0 && p2n > 0) && <div style={{ color: "#a0b8c8", fontSize: "10px" }}>Team bid: {tb}</div>}
                                 {r.results[i].lines.map(function(l, li) {
