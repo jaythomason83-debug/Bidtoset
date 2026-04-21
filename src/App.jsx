@@ -911,7 +911,7 @@ function StatsScreen({ onClose }) {
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 
-function SettingsScreen({ onClose, settings, onSave, gameStarted }) {
+function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstructions }) {
   const [draft, setDraft] = React.useState(Object.assign({}, settings));
 
   function Option({ label, field, options }) {
@@ -1013,7 +1013,7 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted }) {
         {/* Show Instructions toggle */}
         <button onClick={function() {
           try { localStorage.removeItem("bidtoset_onboarded_v1"); } catch(_) {}
-          onClose();
+          if (onShowInstructions) onShowInstructions(); onClose();
         }} style={{ marginTop: "16px", width: "100%", background: "transparent", color: "#6a7a8a", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
           Show Instructions
         </button>
@@ -1439,7 +1439,7 @@ export default function App() {
   const scoreBtnLabel = anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? "Score Round" : "Fill in all fields…";
 
   if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} />;
-  if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} />;
+  if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
   if (screen === "stats") return <StatsScreen onClose={function() { setScreen("game"); }} />;
 
   return (
