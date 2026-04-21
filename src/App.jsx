@@ -1183,7 +1183,7 @@ function OnboardingOverlay({ onDismiss }) {
             </div>
 
             {/* Most bags block */}
-            <div style={{ background: "rgba(232,148,58,0.12)", border: "1px solid rgba(232,148,58,0.5)", borderRadius: "10px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ background: "rgba(232,148,58,0.35)", border: "1px solid rgba(232,148,58,0.8)", borderRadius: "10px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
               <div style={{ fontSize: "16px", background: "rgba(232,148,58,0.25)", borderRadius: "6px", padding: "4px 8px", color: ORANGE, fontWeight: "bold", letterSpacing: "1px" }}>BAGS</div>
               <div>
                 <div style={{ fontSize: "9px", color: ORANGE, letterSpacing: "3px", fontWeight: "bold" }}>MOST BAGS THIS GAME</div>
@@ -1193,7 +1193,7 @@ function OnboardingOverlay({ onDismiss }) {
             </div>
 
             {/* Career sandbagger */}
-            <div style={{ background: "rgba(224,92,92,0.12)", border: "1px solid rgba(224,92,92,0.5)", borderRadius: "10px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ background: "rgba(224,92,92,0.35)", border: "1px solid rgba(224,92,92,0.8)", borderRadius: "10px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "12px" }}>
               <div style={{ fontSize: "16px", background: "rgba(224,92,92,0.25)", borderRadius: "6px", padding: "4px 6px", color: RED, fontWeight: "bold", letterSpacing: "1px" }}>⚠</div>
               <div>
                 <div style={{ fontSize: "9px", color: RED, letterSpacing: "3px", fontWeight: "bold" }}>CAREER SANDBAGGER</div>
