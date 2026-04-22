@@ -1425,6 +1425,35 @@ export default function App() {
     });
   }
 
+
+  function undoLastRound() {
+    if (gs.rounds.length === 0) return;
+    var conf = confirm("Undo Round " + gs.rounds.length + "? This will reverse all score changes and reopen the round for editing.");
+    if (!conf) return;
+    upd(function(s) {
+      var lastRound = s.rounds[s.rounds.length - 1];
+      var prevRounds = s.rounds.slice(0, -1);
+      var prevScores = prevRounds.length > 0 ? prevRounds[prevRounds.length - 1].after : [0, 0];
+      var prevBags = s.teams.map(function(t, i) {
+        var currentBags = t.bags;
+        var roundBags = lastRound.results[i].bags;
+        var penalty = lastRound.penalties ? lastRound.penalties[i] : 0;
+        var restored = currentBags - roundBags;
+        if (penalty !== 0) restored += rules.bagLimit;
+        return Math.max(0, restored);
+      });
+      var newTeams = s.teams.map(function(t, i) {
+        return Object.assign({}, t, { score: prevScores[i], bags: prevBags[i] });
+      });
+      return Object.assign({}, s, {
+        teams: newTeams,
+        rounds: prevRounds,
+        entry: lastRound.entry,
+        lastResult: null,
+        winner: null,
+      });
+    });
+  }
   function reset() {
     if (gs.rounds.length > 0) {
       const gameRecord = buildGameRecord(gs, gs.winner);
