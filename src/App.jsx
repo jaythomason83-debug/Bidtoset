@@ -1582,6 +1582,11 @@ export default function App() {
             </>
           )}
 
+          {gs.rounds.length > 0 && gs.winner === null && (
+            <button onClick={undoLastRound} style={{ background: "transparent", color: "#8a6a5a", border: "1px solid rgba(200,120,60,0.3)", borderRadius: "8px", padding: "8px", fontSize: "9px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%", marginTop: "8px" }}>
+              Undo Round {gs.rounds.length}
+            </button>
+          )}
           {gs.rounds.length > 0 && (
             <div>
               <button onClick={function() { upd(function(s) { return Object.assign({}, s, { showHistory: !s.showHistory }); }); }}
