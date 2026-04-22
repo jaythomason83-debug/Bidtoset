@@ -485,7 +485,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
             <div style={{ background: nilState === 2 ? "rgba(0,191,255,0.1)" : "rgba(200,168,78,0.1)", border: "1px solid " + (nilState === 2 ? "rgba(0,191,255,0.3)" : "rgba(200,168,78,0.3)"), borderRadius: "8px", padding: "12px 8px", textAlign: "center", fontSize: "13px", color: nilState === 2 ? BLUE : GOLD, fontWeight: "bold" }}>BID: 0</div>
           ) : (
             <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Bid" value={bid}
-              onChange={function(ev) { onBid(ev.target.value); }}
+              onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) onBid(v); }}
               style={iStyle({ borderColor: "rgba(200,168,78,0.85)", background: "rgba(200,168,78,0.14)", color: bid === "" ? "#8a9aaa" : "#e8dcc8" })} />
           )}
         </div>
@@ -495,7 +495,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
       </div>
 
       <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Tricks taken" value={tricks}
-        onChange={function(ev) { onTricks(ev.target.value); }}
+        onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) onTricks(v); }}
         style={iStyle({ borderColor: nilState === 2 ? "rgba(0,191,255,0.55)" : nilState === 1 ? "rgba(200,168,78,0.55)" : "rgba(255,255,255,0.35)", color: tricks === "" ? "#8a9aaa" : "#e8dcc8" })} />
     </div>
   );
