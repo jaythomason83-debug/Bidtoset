@@ -1008,14 +1008,8 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
             style={{ background: GOLD, color: DIM, border: "none", borderRadius: "10px", padding: "12px 28px", fontSize: "13px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", boxShadow: "0 0 20px rgba(200,168,78,0.3)" }}>
             Tip the Dev ♠
           </button>
-        {/* Share App */}
-        <div style={{ marginTop: "16px", background: "linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08))", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
-          <div style={{ fontSize: "24px", marginBottom: "6px" }}>📲</div>
-          <div style={{ fontSize: "14px", color: GOLD, fontWeight: "bold", fontFamily: "Georgia, serif", marginBottom: "6px" }}>Share BidToSet</div>
-          <div style={{ fontSize: "11px", color: "#8a9aaa", marginBottom: "14px", lineHeight: 1.6 }}>Scan to get the app on your phone</div>
-          <img src={"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b"} alt="QR Code" style={{ width: "150px", height: "150px", borderRadius: "8px", border: "2px solid rgba(200,168,78,0.4)" }} />
-          <div style={{ fontSize: "10px", color: "#6a7a8a", marginTop: "8px" }}>bidtoset.app</div>
-        </div>        </div>
+        </div>
+        </div>
 
         <div style={{ marginTop: "16px", textAlign: "center" }}><button onClick={function() { setShowQR(function(v) { return !v; }); }} style={{ background: "transparent", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "10px", padding: "10px 20px", fontSize: "11px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>{showQR ? "Hide QR" : "Share BidToSet"}</button>{showQR && <div style={{ marginTop: "12px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "150px", height: "150px", borderRadius: "8px", border: "2px solid rgba(200,168,78,0.4)" }} /><div style={{ fontSize: "10px", color: "#6a7a8a", marginTop: "6px" }}>bidtoset.app</div></div>}</div>
         {/* Show Instructions toggle */}
