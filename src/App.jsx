@@ -540,7 +540,7 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
       )}
 
       {bothNil && (
-        <div style={{ background: "rgba(200,168,78,0.05)", border: "1px solid rgba(200,168,78,0.1)", borderRadius: "8px", padding: "8px 12px", textAlign: "center", fontSize: "11px", color: "#4a5a6a" }}>
+        <div style={{ background: "rgba(200,168,78,0.05)", border: "1px solid rgba(200,168,78,0.1)", borderRadius: "8px", padding: "10px 12px", textAlign: "center", fontSize: "11px", color: "#4a5a6a" }}>
           Both nil - no team bid
         </div>
       )}
@@ -1621,7 +1621,7 @@ export default function App() {
       )}
 
       {/* Bottom Navigation Bar */}
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", gap: "0", background: "rgba(10,18,28,0.95)", borderTop: "1px solid rgba(200,168,78,0.3)", padding: "8px 12px", paddingBottom: "env(safe-area-inset-bottom, 8px)", zIndex: 9000, backdropFilter: "blur(10px)" }}>
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", gap: "0", background: "rgba(0,0,0,0.95)", borderTop: "2px solid rgba(200,168,78,0.7)", padding: "10px 12px", paddingBottom: "env(safe-area-inset-bottom, 8px)", zIndex: 9000, backdropFilter: "blur(10px)" }}>
         <button onClick={function() { setScreen("history"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "history" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>📋</span>History</button>
         <button onClick={function() { setScreen("stats"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "stats" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>📊</span>Stats</button>
         <button onClick={function() { setScreen("game"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "game" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>♠</span>Score</button>
