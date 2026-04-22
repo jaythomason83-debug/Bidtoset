@@ -612,7 +612,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", backdropFilter: "blur(8px)", animation: "fadeIn 0.4s ease-out" }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 300, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 20px 80px 20px", backdropFilter: "blur(8px)", animation: "fadeIn 0.4s ease-out" }}
       onClick={onDismiss}>
       <div onClick={function(e) { e.stopPropagation(); }}
         style={{ background: "linear-gradient(145deg, #0d1528, #090d1b)", border: "1px solid " + GOLD, borderRadius: "18px", padding: "24px", width: "100%", maxWidth: "400px", boxShadow: "0 0 60px rgba(200,168,78,0.3)" }}>
@@ -1132,8 +1132,8 @@ function OnboardingOverlay({ onDismiss }) {
       position: "fixed", inset: 0, zIndex: 400,
       background: "rgba(0,0,0,0.92)",
       backdropFilter: "blur(12px)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "20px",
+      display: "flex", alignItems: "flex-start", justifyContent: "center",
+      padding: "40px 20px 80px 20px",
       opacity: visible ? 1 : 0,
       transition: "opacity 0.3s ease",
     }}>
@@ -1622,10 +1622,10 @@ export default function App() {
 
       {/* Bottom Navigation Bar */}
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", gap: "0", background: "rgba(0,0,0,0.95)", borderTop: "2px solid rgba(200,168,78,0.7)", padding: "10px 12px", paddingBottom: "env(safe-area-inset-bottom, 8px)", zIndex: 9000, backdropFilter: "blur(10px)" }}>
-        <button onClick={function() { setScreen("history"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "history" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>📋</span>History</button>
-        <button onClick={function() { setScreen("stats"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "stats" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>📊</span>Stats</button>
-        <button onClick={function() { setScreen("game"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "game" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>♠</span>Score</button>
-        <button onClick={function() { setScreen("settings"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "settings" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "22px" }}>⚙</span>Rules</button>
+        <button onClick={function() { setScreen("history"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "history" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>📋</span>History</button>
+        <button onClick={function() { setScreen("stats"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "stats" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>📊</span>Stats</button>
+        <button onClick={function() { setScreen("game"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "game" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>♠</span>Score</button>
+        <button onClick={function() { setScreen("settings"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "settings" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>⚙</span>Rules</button>
       </div>      <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         @keyframes flashOrange { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
