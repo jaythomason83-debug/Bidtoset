@@ -681,7 +681,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
           </button>
         </div>
 
-        <div style={{ textAlign: "center", fontSize: "9px", color: "#2a3a4a", marginTop: "12px" }}>Tap outside to dismiss</div>
+        <div style={{ textAlign: "center", fontSize: "9px", color: "#2a3a4a", marginTop: "12px" }}>Tap outside to dismiss</div><div style={{ textAlign: "center", marginTop: "12px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>Scan to get BidToSet</div></div>
       </div>
     </div>
   );
@@ -1007,7 +1007,14 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
             style={{ background: GOLD, color: DIM, border: "none", borderRadius: "10px", padding: "12px 28px", fontSize: "13px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", boxShadow: "0 0 20px rgba(200,168,78,0.3)" }}>
             Tip the Dev ♠
           </button>
-        </div>
+        {/* Share App */}
+        <div style={{ marginTop: "16px", background: "linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08))", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
+          <div style={{ fontSize: "24px", marginBottom: "6px" }}>📲</div>
+          <div style={{ fontSize: "14px", color: GOLD, fontWeight: "bold", fontFamily: "Georgia, serif", marginBottom: "6px" }}>Share BidToSet</div>
+          <div style={{ fontSize: "11px", color: "#8a9aaa", marginBottom: "14px", lineHeight: 1.6 }}>Scan to get the app on your phone</div>
+          <img src={"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b"} alt="QR Code" style={{ width: "150px", height: "150px", borderRadius: "8px", border: "2px solid rgba(200,168,78,0.4)" }} />
+          <div style={{ fontSize: "10px", color: "#6a7a8a", marginTop: "8px" }}>bidtoset.app</div>
+        </div>        </div>
 
         {/* Show Instructions toggle */}
         <button onClick={function() {
