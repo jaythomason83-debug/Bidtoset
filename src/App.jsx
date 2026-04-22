@@ -484,7 +484,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
           {isNil ? (
             <div style={{ background: nilState === 2 ? "rgba(0,191,255,0.1)" : "rgba(200,168,78,0.1)", border: "1px solid " + (nilState === 2 ? "rgba(0,191,255,0.3)" : "rgba(200,168,78,0.3)"), borderRadius: "8px", padding: "12px 8px", textAlign: "center", fontSize: "13px", color: nilState === 2 ? BLUE : GOLD, fontWeight: "bold" }}>BID: 0</div>
           ) : (
-            <input type="number" min="0" max="13" placeholder="Bid" value={bid}
+            <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Bid" value={bid}
               onChange={function(ev) { onBid(ev.target.value); }}
               style={iStyle({ borderColor: "rgba(200,168,78,0.85)", background: "rgba(200,168,78,0.14)", color: bid === "" ? "#8a9aaa" : "#e8dcc8" })} />
           )}
@@ -494,7 +494,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
         </button>
       </div>
 
-      <input type="number" min="0" max="13" placeholder="Tricks taken" value={tricks}
+      <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Tricks taken" value={tricks}
         onChange={function(ev) { onTricks(ev.target.value); }}
         style={iStyle({ borderColor: nilState === 2 ? "rgba(0,191,255,0.55)" : nilState === 1 ? "rgba(200,168,78,0.55)" : "rgba(255,255,255,0.35)", color: tricks === "" ? "#8a9aaa" : "#e8dcc8" })} />
     </div>
@@ -1451,7 +1451,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, backgroundImage: "radial-gradient(ellipse at 20% 50%, #0c1e3a 0%, transparent 50%), radial-gradient(ellipse at 80% 10%, #180a2a 0%, transparent 50%)", fontFamily: "Georgia, serif", color: "#e8dcc8", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
-      <div style={{ width: "100%", maxWidth: "520px", display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div style={{ width: "100%", maxWidth: "520px", display: "flex", flexDirection: "column", minHeight: "100vh", paddingBottom: "70px" }}>
 
         {/* STICKY HEADER */}
         <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(9,13,27,0.97)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(200,168,78,0.1)", padding: "10px 14px" }}>
@@ -1459,12 +1459,6 @@ export default function App() {
             <div style={{ fontSize: "9px", letterSpacing: "3px", color: "#1a2a3a" }}>SPADES</div>
             <div style={{ fontSize: "18px", letterSpacing: "4px", color: GOLD, fontVariant: "small-caps", textShadow: "0 0 20px rgba(200,168,78,0.4)" }}>Scorekeeper</div>
             <div style={{ fontSize: "9px", color: savedFlash ? GREEN : "#1a2a3a", transition: "color 0.3s" }}>{savedFlash ? "saved" : "auto"}</div>
-          </div>
-
-          <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
-            <button onClick={function() { setScreen("history"); }} style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "7px", padding: "7px", fontSize: "10px", color: "#c0d0e0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase" }}>History</button>
-            <button onClick={function() { setScreen("stats"); }} style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "7px", padding: "7px", fontSize: "10px", color: "#c0d0e0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase" }}>Player Stats</button>
-            <button onClick={function() { setScreen("settings"); }} style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "7px", padding: "7px", fontSize: "10px", color: "#c0d0e0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase" }}>Rules ⚙</button>
           </div>
 
           {/* Score cards */}
@@ -1626,7 +1620,13 @@ export default function App() {
         <OnboardingOverlay onDismiss={function() { setShowOnboarding(false); }} />
       )}
 
-      <style>{`
+      {/* Bottom Navigation Bar */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", gap: "0", background: "rgba(10,18,28,0.95)", borderTop: "1px solid rgba(200,168,78,0.3)", padding: "8px 12px", paddingBottom: "env(safe-area-inset-bottom, 8px)", zIndex: 9000, backdropFilter: "blur(10px)" }}>
+        <button onClick={function() { setScreen("history"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "history" ? GOLD : "#6a7a8a", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "16px" }}>📋</span>History</button>
+        <button onClick={function() { setScreen("stats"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "stats" ? GOLD : "#6a7a8a", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "16px" }}>📊</span>Stats</button>
+        <button onClick={function() { setScreen("game"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "game" ? GOLD : "#6a7a8a", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "16px" }}>♠</span>Score</button>
+        <button onClick={function() { setScreen("settings"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "settings" ? GOLD : "#6a7a8a", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "16px" }}>⚙</span>Rules</button>
+      </div>      <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         @keyframes flashOrange { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
         @keyframes flashBlue { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
