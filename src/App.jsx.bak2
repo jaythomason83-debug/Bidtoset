@@ -7,8 +7,6 @@ const BAG_PENALTY = -100;
 const STORAGE_KEY = "spades_v13";
 const HISTORY_KEY = "spades_history_v1";
 const SETTINGS_KEY = "spades_settings_v1";
-const INSTALL_DISMISSED_KEY = "bidtoset_install_dismissed_v1";
-const INSTALL_SHOWN_KEY = "bidtoset_install_shown_v1";
 
 const GOLD = "#c8a84e";
 const RED = "#e05c5c";
@@ -607,106 +605,6 @@ function ResultCard({ result }) {
 
 
 
-
-function InstallPrompt({ gameJustEnded }) {
-  const [deferredEvent, setDeferredEvent] = React.useState(null);
-  const [visible, setVisible] = React.useState(false);
-  const [showIOSHelp, setShowIOSHelp] = React.useState(false);
-
-  // Detect iOS Safari (no beforeinstallprompt support)
-  const isIOS = React.useMemo(function() {
-    if (typeof navigator === "undefined") return false;
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  }, []);
-
-  // Detect already-installed (standalone mode)
-  const isStandalone = React.useMemo(function() {
-    if (typeof window === "undefined") return false;
-    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-  }, []);
-
-  // Listen for Android install opportunity
-  React.useEffect(function() {
-    function handler(e) {
-      e.preventDefault();
-      setDeferredEvent(e);
-    }
-    window.addEventListener("beforeinstallprompt", handler);
-    return function() { window.removeEventListener("beforeinstallprompt", handler); };
-  }, []);
-
-  // Decide whether to show when a game ends
-  React.useEffect(function() {
-    if (!gameJustEnded) return;
-    if (isStandalone) return;
-    try {
-      if (localStorage.getItem(INSTALL_DISMISSED_KEY) === "1") return;
-      // Only show if we can actually prompt (Android) OR this is iOS
-      if (!deferredEvent && !isIOS) return;
-      setVisible(true);
-      localStorage.setItem(INSTALL_SHOWN_KEY, "1");
-    } catch(_) {}
-  }, [gameJustEnded, deferredEvent, isIOS, isStandalone]);
-
-  function dismiss() {
-    setVisible(false);
-    try { localStorage.setItem(INSTALL_DISMISSED_KEY, "1"); } catch(_) {}
-  }
-
-  function install() {
-    if (isIOS) {
-      setShowIOSHelp(true);
-      return;
-    }
-    if (!deferredEvent) return;
-    deferredEvent.prompt();
-    deferredEvent.userChoice.then(function(choice) {
-      if (choice.outcome === "accepted") {
-        setVisible(false);
-      }
-      setDeferredEvent(null);
-    });
-  }
-
-  if (!visible) return null;
-
-  return (
-    <div style={{ marginTop: "14px", background: "linear-gradient(135deg, rgba(200,168,78,0.12), rgba(200,168,78,0.06))", border: "1px solid rgba(200,168,78,0.5)", borderRadius: "12px", padding: "14px", animation: "toastIn 0.5s ease-out" }}>
-      {!showIOSHelp ? (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-            <div style={{ fontSize: "22px" }}>♠</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "12px", color: GOLD, fontWeight: "bold", letterSpacing: "1px" }}>ADD TO HOME SCREEN</div>
-              <div style={{ fontSize: "10px", color: "#8a9aaa", marginTop: "2px" }}>Offline play, no browser chrome.</div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button onClick={install} style={{ flex: 1, background: GOLD, color: DIM, border: "none", borderRadius: "8px", padding: "10px", fontSize: "11px", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer", fontFamily: "Georgia, serif" }}>
-              {isIOS ? "Show Me How" : "Install"}
-            </button>
-            <button onClick={dismiss} style={{ background: "transparent", color: "#8a9aaa", border: "1px solid rgba(138,154,170,0.3)", borderRadius: "8px", padding: "10px 14px", fontSize: "11px", cursor: "pointer", letterSpacing: "1px" }}>
-              Not Now
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ fontSize: "12px", color: GOLD, fontWeight: "bold", letterSpacing: "1px", marginBottom: "8px" }}>INSTALL ON IPHONE</div>
-          <div style={{ fontSize: "11px", color: "#c8d8e8", lineHeight: 1.6, marginBottom: "10px" }}>
-            1. Tap the <span style={{ color: GOLD }}>Share button</span> (square with arrow) at the bottom of Safari<br/>
-            2. Scroll down and tap <span style={{ color: GOLD }}>"Add to Home Screen"</span><br/>
-            3. Tap <span style={{ color: GOLD }}>"Add"</span> in the top right
-          </div>
-          <button onClick={dismiss} style={{ width: "100%", background: "transparent", color: GOLD, border: "1px solid " + GOLD, borderRadius: "8px", padding: "10px", fontSize: "11px", cursor: "pointer", letterSpacing: "1px", fontFamily: "Georgia, serif" }}>
-            Got It
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 function BigJokerSpade() {
   const [taps, setTaps] = React.useState(0);
   const [show, setShow] = React.useState(false);
@@ -876,8 +774,6 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
             </div>
           </div>
         )}
-
-        <InstallPrompt gameJustEnded={gs.winner !== null} />
 
         {/* Cross-game sandbaggers */}
         {summary.sandbaggers.length > 0 && (
