@@ -894,7 +894,7 @@ function StatsScreen({ onClose }) {
 
                   {p.isSandbagger && (
                     <div style={{ marginTop: "10px", background: "rgba(232,148,58,0.1)", border: "1px solid rgba(232,148,58,0.3)", borderRadius: "8px", padding: "8px 10px", fontSize: "11px", color: ORANGE, textAlign: "center" }}>
-                      Sandbagged {p.overBid} of {p.madeBid + p.overBid + p.underBid} rounds - consistently overbidding
+                      Sandbagged {p.overBid} of {p.madeBid + p.overBid + p.underBid} rounds - consistently underbidding
                     </div>
                   )}
                   {p.isDeadWeight && (
