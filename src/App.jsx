@@ -1649,7 +1649,7 @@ export default function App() {
           )}
 
           {gs.winner === null && (
-            <button onClick={reset} style={{ background: "transparent", color: RED, border: "1px solid rgba(224,92,92,0.2)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%" }}>
+            <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "transparent", color: RED, border: "1px solid rgba(224,92,92,0.2)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%" }}>
               Reset Game
             </button>
           )}
