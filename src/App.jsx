@@ -749,6 +749,8 @@ function HistoryScreen({ onClose }) {
                         <div style={{ color: p1n === 2 ? BLUE : p1n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[0] : team.p[0]}: {p1n === 2 ? "Blind Nil" : p1n === 1 ? "Nil" : "bid " + re.p1bid} - {re.p1tricks} tricks{(p1n > 0 && parseInt(re.p1tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                         <div style={{ color: p2n === 2 ? BLUE : p2n === 1 ? GOLD : "#b0c4d8", fontSize: "10px" }}>{nm.p ? nm.p[1] : team.p[1]}: {p2n === 2 ? "Blind Nil" : p2n === 1 ? "Nil" : "bid " + re.p2bid} - {re.p2tricks} tricks{(p2n > 0 && parseInt(re.p2tricks) > 0) ? " ❌ NIL FAILED" : ""}</div>
                         <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
+                        {(parseInt(r.entry[i].p1bid || 0) + parseInt(r.entry[i].p2bid || 0) === 13 && r.results[i].pts > 0) && <div style={{ fontSize: "10px", color: "#00bfff", fontWeight: "bold", marginTop: "3px", textShadow: "0 0 8px rgba(0,191,255,0.6)" }}>BOSTON</div>}
+                        {r.results[i].bags === 0 && r.results[i].pts > 0 && !r.results[i].wasSet && <div style={{ fontSize: "9px", color: "#c8a84e", fontStyle: "italic", marginTop: "2px", textShadow: "0 0 6px rgba(200,168,78,0.4)" }}>Clean Hand</div>}
                         {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                       </div>
@@ -1517,6 +1519,9 @@ export default function App() {
                     })}
                   </div>
                   <div style={{ fontSize: "9px", color: "#8aafc0", marginTop: "3px" }}>{t.score < rules.winScore ? "Need " + (rules.winScore - t.score) : "GAME POINT"}</div>
+                  {t.score === 69 && <div style={{ fontSize: "10px", color: "#c8a84e", fontStyle: "italic", marginTop: "2px", opacity: 0.8 }}>Nice.</div>}
+                  {t.score === 420 && <div style={{ fontSize: "12px", marginTop: "2px" }}>&#127807;</div>}
+                  {t.score === 7 && <div style={{ fontSize: "9px", color: "#a0b0c0", fontStyle: "italic", marginTop: "2px" }}>Bond. James Bond.</div>}
                 </div>
               );
             })}
