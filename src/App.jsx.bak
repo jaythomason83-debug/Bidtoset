@@ -50,10 +50,6 @@ function buildGameRecord(gs, winner) {
   };
 }
 
-
-function hapticPulse(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(_) {} }
-function isRedditName(n) { if (!n) return false; const s = String(n).trim().toLowerCase(); return s === "reddit" || s === "snoo"; }
-
 // ─── Player Analytics Engine ──────────────────────────────────────────────────
 
 function buildPlayerStats(history) {
@@ -600,104 +596,7 @@ function ResultCard({ result }) {
 
 // ─── Game Summary Card ────────────────────────────────────────────────────────
 
-
-
-
-
-
-function BigJokerSpade() {
-  const [taps, setTaps] = React.useState(0);
-  const [show, setShow] = React.useState(false);
-  const timerRef = React.useRef(null);
-  function onTap() {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    const next = taps + 1;
-    setTaps(next);
-    if (next >= 5) {
-      setTaps(0); setShow(true);
-      hapticPulse([40,30,40,30,100]);
-      setTimeout(function(){ setShow(false); }, 2000);
-    } else {
-      timerRef.current = setTimeout(function(){ setTaps(0); }, 900);
-    }
-  }
-  return (
-    <>
-      <div onClick={onTap} style={{ fontSize: "32px", lineHeight: 1, marginBottom: "6px", cursor: "pointer", userSelect: "none" }}>♠</div>
-      {show && (
-        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 999 }}>
-          <div style={{ background: "linear-gradient(135deg, #c8a84e, #fff0c0, #c8a84e)", color: "#1a1208", padding: "40px 30px", borderRadius: "16px", fontFamily: "Georgia, serif", textAlign: "center", boxShadow: "0 0 80px rgba(200,168,78,0.8)", animation: "jokerSlide 2s ease-in-out" }}>
-            <div style={{ fontSize: "60px" }}>🃏</div>
-            <div style={{ fontSize: "20px", fontWeight: "bold", letterSpacing: "4px", marginTop: "8px" }}>BIG JOKER</div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function RenegadeIcon() {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <span style={{ display: "inline-block", marginLeft: "6px", cursor: "pointer", fontSize: "10px" }} onClick={function(e){ e.stopPropagation(); setOpen(function(v){return !v;}); }}>
-      🔍
-      {open && <div style={{ fontSize: "9px", color: "#9b59b6", fontStyle: "italic", marginTop: "2px" }}>Checking the books... you sure you didn't reneg?</div>}
-    </span>
-  );
-}
-
-function MercyRuleBanner({ teams }) {
-  const [msgOpen, setMsgOpen] = React.useState(false);
-  if (!teams || teams.length !== 2) return null;
-  const spread = Math.abs(teams[0].score - teams[1].score);
-  if (spread < 200) return null;
-  const loser = teams[0].score < teams[1].score ? teams[0] : teams[1];
-  return (
-    <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", animation: "toastIn 0.4s ease-out" }}>
-      <div style={{ fontSize: "16px", cursor: "pointer" }} onClick={function(){ setMsgOpen(function(v){return !v;}); }}>🏳️</div>
-      <div style={{ fontSize: "10px", color: "#8a9aaa", letterSpacing: "1px" }}>
-        {msgOpen ? ("It's okay to quit. We won't tell Reddit.") : (loser.name + " down " + spread + " — surrender?")}
-      </div>
-    </div>
-  );
-}
-
-function BagLadyWarning({ teams, bagLimit }) {
-  const danger = teams.filter(function(t) { return t.bags >= (bagLimit - 1) && t.bags < bagLimit; });
-  React.useEffect(function() { if (danger.length > 0) hapticPulse(25); }, [danger.length]);
-  if (danger.length === 0) return null;
-  return (
-    <div style={{ background: "rgba(224,92,92,0.15)", border: "1px solid rgba(224,92,92,0.7)", borderRadius: "10px", padding: "10px 14px", textAlign: "center", animation: "bagPulse 1.4s ease-in-out infinite, toastIn 0.4s ease-out" }}>
-      <div style={{ fontSize: "10px", color: "#e05c5c", letterSpacing: "2px", fontWeight: "bold", marginBottom: "2px" }}>⚠ BAG LADY ALERT</div>
-      <div style={{ fontSize: "11px", color: "#c88080", fontStyle: "italic" }}>
-        {danger.map(function(t){return t.name;}).join(" & ")} — one book from a {bagLimit * -10} disaster.
-      </div>
-    </div>
-  );
-}
-
-function SandbaggerBadge({ player, rules }) {
-  const [revealed, setRevealed] = React.useState(false);
-  const timerRef = React.useRef(null);
-  const pointsLost = (player.totalBags || 0) * 1 + Math.floor((player.totalBags || 0) / (rules && rules.bagLimit ? rules.bagLimit : 10)) * 100;
-  function start() { timerRef.current = setTimeout(function(){ setRevealed(true); hapticPulse([8,12,8,12,8]); }, 600); }
-  function cancel() { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } }
-  return (
-    <div onMouseDown={start} onMouseUp={cancel} onMouseLeave={cancel} onTouchStart={start} onTouchEnd={cancel}
-      style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: revealed ? "rgba(224,92,92,0.25)" : "rgba(232,148,58,0.2)", color: revealed ? "#e05c5c" : "#e8943a", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer", userSelect: "none", transition: "all 0.3s" }}>
-      {revealed ? ("−" + pointsLost + " PTS LOST") : "SANDBAGGER"}
-    </div>
-  );
-}
-
 function GameSummaryCard({ gs, rules, onDismiss }) {
-  const hadBoston = gs.rounds.some(function(r) {
-    return r.results && r.entry && [0,1].some(function(ti) {
-      var e = r.entry[ti] || {}; var b1 = parseInt(e.p1bid||0); var b2 = parseInt(e.p2bid||0);
-      return (b1 + b2) === 13 && r.results[ti] && r.results[ti].pts > 0;
-    });
-  });
-  React.useEffect(function() { if (hadBoston) hapticPulse([40,30,40,30,120]); }, [hadBoston]);
   const [showQR, setShowQR] = React.useState(false);
   const summary = buildGameSummary(gs, rules);
   const winner = gs.winner !== null ? gs.teams[gs.winner] : null;
@@ -730,17 +629,10 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
 
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: "20px" }}>
-          <BigJokerSpade />
+          <div style={{ fontSize: "32px", lineHeight: 1, marginBottom: "6px" }}>♠</div>
           <div style={{ fontSize: "20px", color: GOLD, fontVariant: "small-caps", letterSpacing: "3px" }}>Game Summary</div>
-          <div style={{ fontSize: "11px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.app</div>
+          <div style={{ fontSize: "11px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.netlify.app</div>
         </div>
-        {hadBoston && (
-          <div style={{ background: "linear-gradient(135deg, #c8a84e, #e8c878, #c8a84e)", color: "#1a1208", textAlign: "center", padding: "14px 10px", borderRadius: "12px", marginBottom: "14px", fontFamily: "Georgia, serif", letterSpacing: "2px", animation: "goldFlood 0.8s ease-out", boxShadow: "0 0 40px rgba(200,168,78,0.6)" }}>
-            <div style={{ fontSize: "11px", letterSpacing: "4px", opacity: 0.7 }}>★ CLEAN SWEEP ★</div>
-            <div style={{ fontSize: "22px", fontWeight: "bold", margin: "4px 0" }}>BOSTON</div>
-            <div style={{ fontSize: "10px", fontStyle: "italic", opacity: 0.75 }}>All 13 tricks. Hang the broom.</div>
-          </div>
-        )}
 
         {/* Winner */}
         {winner && (
@@ -860,7 +752,6 @@ function HistoryScreen({ onClose }) {
                         <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
                         {(parseInt(r.entry[i].p1bid || 0) + parseInt(r.entry[i].p2bid || 0) === 13 && r.results[i].pts > 0) && <div style={{ fontSize: "10px", color: "#00bfff", fontWeight: "bold", marginTop: "3px", textShadow: "0 0 8px rgba(0,191,255,0.6)" }}>BOSTON</div>}
                         {r.results[i].bags === 0 && r.results[i].pts > 0 && !r.results[i].wasSet && <div style={{ fontSize: "9px", color: "#c8a84e", fontStyle: "italic", marginTop: "2px", textShadow: "0 0 6px rgba(200,168,78,0.4)" }}>Clean Hand</div>}
-                        {((parseInt(r.entry[i].p1bid||0) >= 5 && parseInt(r.entry[i].p1tricks||0) === 0) || (parseInt(r.entry[i].p2bid||0) >= 5 && parseInt(r.entry[i].p2tricks||0) === 0)) && <RenegadeIcon />}
                         {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                       </div>
@@ -957,11 +848,11 @@ function StatsScreen({ onClose }) {
               return (
                 <div key={p.name} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid " + (p.isSandbagger ? "rgba(232,148,58,0.4)" : "rgba(200,168,78,0.15)"), borderRadius: "12px", padding: "14px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <div style={{ fontSize: "16px", color: GOLD, fontWeight: "bold" }}>{isRedditName(p.name) ? "👽 " : ""}{p.name}</div>
+                    <div style={{ fontSize: "16px", color: GOLD, fontWeight: "bold" }}>{p.name}</div>
                     <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {p.isHeavyLifter && <div style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: "rgba(109,191,142,0.2)", color: GREEN, fontWeight: "bold", letterSpacing: "1px" }}>HEAVY LIFTER</div>}
                       {p.isDeadWeight && <div style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: "rgba(224,92,92,0.2)", color: RED, fontWeight: "bold", letterSpacing: "1px" }}>DEAD WEIGHT</div>}
-                      {p.isSandbagger && <SandbaggerBadge player={p} rules={rules} />}
+                      {p.isSandbagger && <div style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: "rgba(232,148,58,0.2)", color: ORANGE, fontWeight: "bold", letterSpacing: "1px" }}>SANDBAGGER</div>}
                       <div style={{ fontSize: "11px", color: "#4a5a6a" }}>{p.games} game{p.games !== 1 ? "s" : ""}</div>
                     </div>
                   </div>
@@ -1595,8 +1486,7 @@ export default function App() {
   const anySet = gs.entry.some(pendingSet);
 
   const scoreBtnBg = anyTricksMismatch ? RED : anyBidOne ? RED : anySet ? ORANGE : anyBlindNil ? BLUE : canScore ? GOLD : "rgba(255,255,255,0.12)";
-  const anyWheel = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) === 13; });
-  const scoreBtnLabel = anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
+  const scoreBtnLabel = anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? "Score Round" : "Fill in all fields…";
 
   if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
@@ -1693,9 +1583,6 @@ export default function App() {
                     onPlayerName={setPlayerName} />
                 );
               })}
-
-              <BagLadyWarning teams={gs.teams} bagLimit={rules.bagLimit} />
-              <MercyRuleBanner teams={gs.teams} />
 
               <button onClick={scoreRound} disabled={!canScore} style={{
                 background: scoreBtnBg, color: canScore ? DIM : "#c8d8e8", border: "none", borderRadius: "10px",
