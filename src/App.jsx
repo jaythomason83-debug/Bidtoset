@@ -597,6 +597,7 @@ function ResultCard({ result }) {
 // ─── Game Summary Card ────────────────────────────────────────────────────────
 
 function GameSummaryCard({ gs, rules, onDismiss }) {
+  const [showQR, setShowQR] = React.useState(false);
   const summary = buildGameSummary(gs, rules);
   const winner = gs.winner !== null ? gs.teams[gs.winner] : null;
   const loser = gs.winner !== null ? gs.teams[gs.winner === 0 ? 1 : 0] : null;
@@ -690,7 +691,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
           </button>
         </div>
 
-        <div style={{ textAlign: "center", fontSize: "9px", color: "#2a3a4a", marginTop: "12px" }}>Tap outside to dismiss</div><div style={{ textAlign: "center", marginTop: "12px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>Scan to get BidToSet</div></div>
+        <div style={{ textAlign: "center", fontSize: "9px", color: "#2a3a4a", marginTop: "12px" }}>Tap outside to dismiss</div><div style={{ textAlign: "center", marginTop: "10px" }}><button onClick={function() { setShowQR(function(v) { return !v; }); }} style={{ background: "transparent", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "8px", padding: "6px 16px", fontSize: "9px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>{showQR ? "Hide QR" : "Share App"}</button>{showQR && <div style={{ marginTop: "8px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.app</div></div>}</div>
       </div>
     </div>
   );
