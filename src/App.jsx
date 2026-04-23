@@ -61,7 +61,7 @@ function buildPlayerStats(history) {
         name: name,
         games: 0, wins: 0,
         rounds: 0,
-        totalBid: 0, totalTricks: 0,
+        totalBid: 0, totalTricks: 0, totalTricksForDW: 0, teamTotalTricksDW: 0,
         teamTotalTricks: 0,
         madeBid: 0, overBid: 0, underBid: 0,
         totalBags: 0,
@@ -125,8 +125,17 @@ function buildPlayerStats(history) {
           }
           if (result.wasSet) p2.sets++;
 
+          var p1isNil = entry.p1nil > 0;
+          var p2isNil = entry.p2nil > 0;
           var rawT1 = parseInt(entry.p1tricks) || 0;
           var rawT2 = parseInt(entry.p2tricks) || 0;
+          var nonNilT1 = p1isNil ? 0 : rawT1;
+          var nonNilT2 = p2isNil ? 0 : rawT2;
+          var teamNonNil = nonNilT1 + nonNilT2;
+          if (teamNonNil > 0) {
+            if (!p1isNil) { p1.totalTricksForDW += nonNilT1; p1.teamTotalTricksDW += teamNonNil; }
+            if (!p2isNil) { p2.totalTricksForDW += nonNilT2; p2.teamTotalTricksDW += teamNonNil; }
+          }
           var teamTotal = rawT1 + rawT2;
           if (teamTotal > 0) {
             p1.teamTotalTricks += teamTotal;
@@ -146,7 +155,7 @@ function buildPlayerStats(history) {
     p.blindNilRate = p.blindNilAttempts > 0 ? Math.round((p.blindNilSuccess / p.blindNilAttempts) * 100) : null;
     p.avgBagsPerRound = biddingRounds > 0 ? (p.totalBags / biddingRounds).toFixed(1) : "0.0";
     p.isSandbagger = p.sandbagRate >= 30 && biddingRounds >= 5;
-    p.deadWeightIndex = p.teamTotalTricks > 0 ? Math.round((p.totalTricks / p.teamTotalTricks) * 100) : null;
+    p.deadWeightIndex = p.teamTotalTricksDW > 0 ? Math.round((p.totalTricksForDW / p.teamTotalTricksDW) * 100) : null;
     p.isDeadWeight = p.deadWeightIndex !== null && p.deadWeightIndex < 40 && p.rounds >= 5;
     p.isHeavyLifter = p.deadWeightIndex !== null && p.deadWeightIndex > 60 && p.rounds >= 5;
   });
@@ -162,7 +171,7 @@ function buildGameSummary(gs, rules) {
 
   function getP(name) {
     if (!playerMap[name]) {
-      playerMap[name] = { name: name, totalBid: 0, totalTricks: 0, madeBid: 0, overBid: 0, underBid: 0, bags: 0, pts: 0, rounds: 0, teamName: "" };
+      playerMap[name] = { name: name, totalBid: 0, totalTricks: 0, totalTricksForDW: 0, teamTotalTricksDW: 0, madeBid: 0, overBid: 0, underBid: 0, bags: 0, pts: 0, rounds: 0, teamName: "" };
     }
     return playerMap[name];
   }
