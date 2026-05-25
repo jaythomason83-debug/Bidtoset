@@ -33,6 +33,19 @@ function loadHistory() {
 function saveGameToHistory(gameData) {
   try {
     const history = loadHistory();
+    // Dedupe guard: skip if the most recent entry is the same game written again
+    // (e.g. impure state-updater firing twice under React StrictMode). Match on
+    // final scores + round count + an id within a 5s window. A genuinely replayed
+    // identical game minutes later will have an id far outside the window.
+    const last = history[0];
+    if (last && last.teams && gameData.teams &&
+        last.teams.length === gameData.teams.length &&
+        last.teams[0].score === gameData.teams[0].score &&
+        last.teams[1].score === gameData.teams[1].score &&
+        last.totalRounds === gameData.totalRounds &&
+        Math.abs((last.id || 0) - (gameData.id || 0)) < 5000) {
+      return;
+    }
     history.unshift(gameData);
     if (history.length > 50) history.pop();
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
@@ -80,7 +93,9 @@ function buildPlayerStats(history) {
   }
 
   history.forEach(function(game) {
+    if (!game || !game.teams) return;
     game.teams.forEach(function(team, ti) {
+      if (!team || !team.p) return;
       var p1name = team.p[0];
       var p2name = team.p[1];
       var p1 = getPlayer(p1name);
@@ -522,6 +537,7 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
+  const bidOver13 = total > 13;
   const warn = bidOneViolation(e);
   const setAlert = pendingSet(e);
   const p1filled = e.p1nil > 0 || e.p1bid !== "";
@@ -542,8 +558,9 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
       {!bothNil && (
         <div style={{ background: setAlert ? "rgba(232,148,58,0.1)" : hasBids ? "rgba(200,168,78,0.08)" : "rgba(255,255,255,0.03)", border: "1px solid " + (setAlert ? ORANGE : warn ? RED : hasBids ? "rgba(200,168,78,0.3)" : "rgba(255,255,255,0.08)"), borderRadius: "8px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: "11px", color: "#c8d8e8", letterSpacing: "2px" }}>TEAM BID</div>
-          <div style={{ fontSize: "28px", fontWeight: "bold", color: setAlert ? ORANGE : warn ? RED : hasBids ? GOLD : "#3a4a5a" }}>{hasBids ? total : "-"}</div>
-          {warn && !setAlert && <div style={{ fontSize: "10px", color: RED, fontWeight: "bold" }}>MIN 2</div>}
+          <div style={{ fontSize: "28px", fontWeight: "bold", color: bidOver13 ? RED : setAlert ? ORANGE : warn ? RED : hasBids ? GOLD : "#3a4a5a" }}>{hasBids ? total : "-"}</div>
+          {bidOver13 && <div style={{ fontSize: "10px", color: RED, fontWeight: "bold" }}>MAX 13</div>}
+            {warn && !setAlert && !bidOver13 && <div style={{ fontSize: "10px", color: RED, fontWeight: "bold" }}>MIN 2</div>}
           {setAlert && <div style={{ fontSize: "10px", color: ORANGE, fontWeight: "bold" }}>SET!</div>}
         </div>
       )}
@@ -1065,7 +1082,7 @@ function StatsScreen({ onClose }) {
                     <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {p.isHeavyLifter && <div style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: "rgba(109,191,142,0.2)", color: GREEN, fontWeight: "bold", letterSpacing: "1px" }}>HEAVY LIFTER</div>}
                       {p.isDeadWeight && <div style={{ fontSize: "10px", padding: "3px 8px", borderRadius: "4px", background: "rgba(224,92,92,0.2)", color: RED, fontWeight: "bold", letterSpacing: "1px" }}>DEAD WEIGHT</div>}
-                      {p.isSandbagger && <SandbaggerBadge player={p} rules={rules} />}
+                      {p.isSandbagger && <SandbaggerBadge player={p} />}
                       <div style={{ fontSize: "11px", color: "#4a5a6a" }}>{p.games} game{p.games !== 1 ? "s" : ""}</div>
                     </div>
                   </div>
@@ -1680,7 +1697,7 @@ export default function App() {
     });
   }
   function reset() {
-    if (gs.rounds.length > 0) {
+    if (gs.rounds.length > 0 && gs.winner === null) {
       const gameRecord = buildGameRecord(gs, gs.winner);
       saveGameToHistory(gameRecord);
     }
@@ -1693,14 +1710,15 @@ export default function App() {
   const bothTeamsTricksFilled = gs.entry.every(teamTricksFilled);
   const combinedTricks = gs.entry.reduce(function(sum, e) { return sum + teamTricks(e); }, 0);
   const anyTricksMismatch = bothTeamsTricksFilled && combinedTricks !== 13;
-  const canScore = gs.entry.every(isReady) && !anyTricksMismatch;
+  const anyBidOver13 = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) > 13; });
+  const canScore = gs.entry.every(isReady) && !anyTricksMismatch && !anyBidOver13;
   const anyBidOne = rules.minBid >= 2 && gs.entry.some(bidOneViolation);
   const anyBlindNil = gs.entry.some(function(e) { return e.p1nil === 2 || e.p2nil === 2; });
   const anySet = gs.entry.some(pendingSet);
 
-  const scoreBtnBg = anyTricksMismatch ? RED : anyBidOne ? RED : anySet ? ORANGE : anyBlindNil ? BLUE : canScore ? GOLD : "rgba(255,255,255,0.12)";
+  const scoreBtnBg = anyBidOver13 ? RED : anyTricksMismatch ? RED : anyBidOne ? RED : anySet ? ORANGE : anyBlindNil ? BLUE : canScore ? GOLD : "rgba(255,255,255,0.12)";
   const anyWheel = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) === 13; });
-  const scoreBtnLabel = anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
+  const scoreBtnLabel = anyBidOver13 ? "Team bid cannot exceed 13" : anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
 
   if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
