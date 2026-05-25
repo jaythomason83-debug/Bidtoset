@@ -394,11 +394,13 @@ function blank() {
   return { p1bid: "", p2bid: "", p1nil: 0, p2nil: 0, p1tricks: "", p2tricks: "" };
 }
 
-function newGame() {
+function newGame(prev) {
+  const t0 = prev && prev.teams && prev.teams[0];
+  const t1 = prev && prev.teams && prev.teams[1];
   return {
     teams: [
-      { name: "Team 1", score: 0, bags: 0, p: ["Player 1", "Player 2"] },
-      { name: "Team 2", score: 0, bags: 0, p: ["Player 3", "Player 4"] },
+      { name: t0 ? t0.name : "Team 1", score: 0, bags: 0, p: t0 ? [t0.p[0], t0.p[1]] : ["Player 1", "Player 2"] },
+      { name: t1 ? t1.name : "Team 2", score: 0, bags: 0, p: t1 ? [t1.p[0], t1.p[1]] : ["Player 3", "Player 4"] },
     ],
     entry: [blank(), blank()],
     rounds: [], lastResult: null, winner: null, showHistory: false,
@@ -1702,7 +1704,7 @@ export default function App() {
       saveGameToHistory(gameRecord);
     }
     try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
-    setGs(newGame());
+    setGs(newGame(gs));
     setShowSummary(false);
   }
 
