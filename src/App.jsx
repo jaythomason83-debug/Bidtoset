@@ -175,7 +175,7 @@ function buildPlayerStats(history) {
     p.nilRate = p.nilAttempts > 0 ? Math.round((p.nilSuccess / p.nilAttempts) * 100) : null;
     p.blindNilRate = p.blindNilAttempts > 0 ? Math.round((p.blindNilSuccess / p.blindNilAttempts) * 100) : null;
     p.avgBagsPerRound = biddingRounds > 0 ? (p.totalBags / biddingRounds).toFixed(1) : "0.0";
-    p.isSandbagger = p.sandbagRate >= 30 && biddingRounds >= 5;
+    p.isSandbagger = p.sandbagRate >= 50 && parseFloat(p.avgBagsPerRound) >= 1.0 && biddingRounds >= 8;
     p.deadWeightIndex = p.teamTotalTricksDW > 0 ? Math.round((p.totalTricksForDW / p.teamTotalTricksDW) * 100) : null;
     p.isDeadWeight = p.deadWeightIndex !== null && p.deadWeightIndex < 40 && p.rounds >= 5;
     p.isHeavyLifter = p.deadWeightIndex !== null && p.deadWeightIndex > 60 && p.rounds >= 5;
