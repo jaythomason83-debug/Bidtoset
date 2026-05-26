@@ -399,8 +399,8 @@ function newGame(prev) {
   const t1 = prev && prev.teams && prev.teams[1];
   return {
     teams: [
-      { name: t0 ? t0.name : "Team 1", score: 0, bags: 0, p: t0 ? [t0.p[0], t0.p[1]] : ["Player 1", "Player 2"] },
-      { name: t1 ? t1.name : "Team 2", score: 0, bags: 0, p: t1 ? [t1.p[0], t1.p[1]] : ["Player 3", "Player 4"] },
+      { name: "Team 1", score: 0, bags: 0, p: ["Player 1", "Player 2"] },
+      { name: "Team 2", score: 0, bags: 0, p: ["Player 3", "Player 4"] },
     ],
     entry: [blank(), blank()],
     rounds: [], lastResult: null, winner: null, showHistory: false,
@@ -1562,6 +1562,19 @@ export default function App() {
     return (s.seating && s.seating.dealer) ? s.seating : { N: null, S: null, E: null, W: null, dealer: null };
   });
   const [setupPickingSeat, setSetupPickingSeat] = useState(null);
+  const [setupPlayerNames, setSetupPlayerNames] = useState(["", "", "", ""]);
+  const [setupTeamNames, setSetupTeamNames] = useState(["", ""]);
+  useEffect(function() {
+    if (showSetup) {
+      function splitTeam(t) {
+        const sp = t.name.split(/\s+and\s+/i);
+        if (sp.length === 2) return [sp[0].trim(), sp[1].trim()];
+        return [t.p[0] || "", t.p[1] || ""];
+      }
+      setSetupPlayerNames(["", "", "", ""]);
+      setSetupTeamNames(["", ""]);
+    }
+  }, [showSetup]);
 
   useEffect(function() {
     if (screen === "game") {
@@ -1719,7 +1732,7 @@ export default function App() {
       const gameRecord = buildGameRecord(gs, gs.winner);
       saveGameToHistory(gameRecord);
     }
-    try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
+    try { localStorage.clear(); } catch(_) {}
     setGs(newGame(gs));
     setShowSummary(false);
     const prevSeating = gs.seating && gs.seating.dealer ? gs.seating : null;
@@ -1729,6 +1742,15 @@ export default function App() {
       setSetupSeating({ N: null, S: null, E: null, W: null, dealer: null });
     }
     setSetupStep(1);
+    function splitName(team) {
+      const split = team.name.split(/\s+and\s+/i);
+      if (split.length === 2) return [split[0].trim(), split[1].trim()];
+      return [team.p[0] || "", team.p[1] || ""];
+    }
+    const t0 = splitName(gs.teams[0]);
+    const t1 = splitName(gs.teams[1]);
+    setSetupPlayerNames(["", "", "", ""]);
+    setSetupTeamNames(["", ""]);
     setShowSetup(true);
   }
 
@@ -1783,9 +1805,12 @@ export default function App() {
 
   // ── Setup modal: get all 4 player names from current gs ──────────────────
   function getSetupPlayers() {
+    const n = setupPlayerNames;
     return [
-      gs.teams[0].p[0], gs.teams[0].p[1],
-      gs.teams[1].p[0], gs.teams[1].p[1],
+      n[0] || gs.teams[0].p[0],
+      n[1] || gs.teams[0].p[1],
+      n[2] || gs.teams[1].p[0],
+      n[3] || gs.teams[1].p[1],
     ];
   }
 
@@ -2011,17 +2036,37 @@ export default function App() {
                       <input
                         type="text"
                         placeholder={"e.g. " + (ti === 0 ? "Debbie and Jay" : "Robbie and Shannon")}
-                        defaultValue={team.name === "Team " + (ti+1) ? "" : team.name}
+                        value={setupTeamNames[ti] || ""}
                         onChange={function(ev) {
                           const v = ev.target.value;
+                          setSetupTeamNames(function(prev) {
+                            const next = prev.slice();
+                            next[ti] = v;
+                            return next;
+                          });
+                          const split = v.split(/\s+and\s+/i);
+                          if (split.length === 2) {
+                            setSetupPlayerNames(function(prev) {
+                              const next = prev.slice();
+                              next[ti * 2] = split[0].trim();
+                              next[ti * 2 + 1] = split[1].trim();
+                              return next;
+                            });
+                          } else {
+                            setSetupPlayerNames(function(prev) {
+                              const next = prev.slice();
+                              next[ti * 2] = v;
+                              next[ti * 2 + 1] = "";
+                              return next;
+                            });
+                          }
                           upd(function(s) {
                             const teams = s.teams.map(function(t, i) {
                               if (i !== ti) return t;
-                              const split = v.split(/\s+and\s+/i);
                               const newP = [t.p[0], t.p[1]];
                               if (split.length === 2) {
-                                if (isDefaultPlayerName(t.p[0])) newP[0] = split[0].trim();
-                                if (isDefaultPlayerName(t.p[1])) newP[1] = split[1].trim();
+                                newP[0] = split[0].trim();
+                                newP[1] = split[1].trim();
                               }
                               return Object.assign({}, t, { name: v, p: newP });
                             });
@@ -2031,7 +2076,7 @@ export default function App() {
                         style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "8px", padding: "12px 14px", fontSize: "15px", color: "#e8dcc8", outline: "none", width: "100%", boxSizing: "border-box" }}
                       />
                       <div style={{ fontSize: "10px", color: "#5a7a5a", fontStyle: "italic" }}>
-                        Type "Name and Name" to auto-fill players · {team.p[0]} / {team.p[1]}
+                        Type "Name and Name" to auto-fill players · {setupPlayerNames[ti * 2] || "?"} / {setupPlayerNames[ti * 2 + 1] || "?"}
                       </div>
                     </div>
                   );
