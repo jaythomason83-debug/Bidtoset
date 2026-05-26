@@ -933,7 +933,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
 
 // ─── History Screen ───────────────────────────────────────────────────────────
 
-function HistoryScreen({ onClose }) {
+function HistoryScreen({ onClose, onReset }) {
   const [history, setHistory] = useState(loadHistory);
   const [selected, setSelected] = useState(null);
 
@@ -1007,7 +1007,10 @@ function HistoryScreen({ onClose }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
           <button onClick={onClose} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "8px", padding: "8px 14px", color: "#c0d0e0", cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "12px" }}>Close</button>
           <div style={{ fontSize: "20px", color: GOLD, fontVariant: "small-caps", letterSpacing: "3px" }}>Game History</div>
-          <button onClick={clearHistory} style={{ background: "transparent", border: "1px solid rgba(224,92,92,0.3)", borderRadius: "8px", padding: "8px 14px", color: RED, cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "10px" }}>Clear All</button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            {onReset && <button onClick={onReset} style={{ background: "rgba(200,168,78,0.12)", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "8px", padding: "8px 14px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "10px", fontWeight: "bold" }}>New Game</button>}
+            <button onClick={clearHistory} style={{ background: "transparent", border: "1px solid rgba(224,92,92,0.3)", borderRadius: "8px", padding: "8px 14px", color: RED, cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "10px" }}>Clear All</button>
+          </div>
         </div>
 
         {history.length === 0 ? (
@@ -1549,9 +1552,15 @@ export default function App() {
   const [rules, setRules] = useState(loadSettings);
   const [showSummary, setShowSummary] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(!hasOnboarded());
-  const [showSetup, setShowSetup] = useState(false);
+  const [showSetup, setShowSetup] = useState(function() {
+    const s = load();
+    return !s.seating || !s.seating.dealer;
+  });
   const [setupStep, setSetupStep] = useState(1);
-  const [setupSeating, setSetupSeating] = useState({ N: null, S: null, E: null, W: null, dealer: null });
+  const [setupSeating, setSetupSeating] = useState(function() {
+    const s = load();
+    return (s.seating && s.seating.dealer) ? s.seating : { N: null, S: null, E: null, W: null, dealer: null };
+  });
   const [setupPickingSeat, setSetupPickingSeat] = useState(null);
 
   useEffect(function() {
@@ -1794,7 +1803,7 @@ export default function App() {
   const anyWheel = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) === 13; });
   const scoreBtnLabel = anyBidOver13 ? "Team bid cannot exceed 13" : anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
 
-  if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} />;
+  if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} onReset={function() { setScreen("game"); reset(); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
   if (screen === "stats") return <StatsScreen onClose={function() { setScreen("game"); }} />;
 
@@ -1807,7 +1816,10 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <div style={{ fontSize: "9px", letterSpacing: "3px", color: "#1a2a3a" }}>SPADES</div>
             <div style={{ fontSize: "18px", letterSpacing: "4px", color: GOLD, fontVariant: "small-caps", textShadow: "0 0 20px rgba(200,168,78,0.4)" }}>Scorekeeper</div>
-            <div style={{ fontSize: "9px", color: savedFlash ? GREEN : "#1a2a3a", transition: "color 0.3s" }}>{savedFlash ? "saved" : "auto"}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ fontSize: "9px", color: savedFlash ? GREEN : "#1a2a3a", transition: "color 0.3s" }}>{savedFlash ? "saved" : "auto"}</div>
+              <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "rgba(200,168,78,0.1)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "6px", padding: "4px 10px", fontSize: "9px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>New Game</button>
+            </div>
           </div>
 
           {/* Score cards */}
@@ -1961,7 +1973,7 @@ export default function App() {
           )}
 
           {gs.winner === null && (
-            <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "transparent", color: RED, border: "1px solid rgba(224,92,92,0.2)", borderRadius: "8px", padding: "10px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%" }}>
+            <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "rgba(200,168,78,0.12)", color: GOLD, border: "1px solid rgba(200,168,78,0.4)", borderRadius: "8px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%", fontWeight: "bold" }}>
               Reset Game
             </button>
           )}
