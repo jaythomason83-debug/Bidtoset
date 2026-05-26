@@ -404,6 +404,8 @@ function newGame(prev) {
     ],
     entry: [blank(), blank()],
     rounds: [], lastResult: null, winner: null, showHistory: false,
+    seating: prev && prev.seating ? prev.seating : { N: null, S: null, E: null, W: null, dealer: null },
+    activeBidSeat: null,
   };
 }
 
@@ -496,7 +498,7 @@ function EditableName({ value, onChange, style }) {
 
 // ─── Player Row ───────────────────────────────────────────────────────────────
 
-function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks }) {
+function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef }) {
   const ns = nilBtnStyle(nilState);
   const isNil = nilState > 0;
 
@@ -517,8 +519,9 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
             <div style={{ background: nilState === 2 ? "rgba(0,191,255,0.1)" : "rgba(200,168,78,0.1)", border: "1px solid " + (nilState === 2 ? "rgba(0,191,255,0.3)" : "rgba(200,168,78,0.3)"), borderRadius: "8px", padding: "12px 8px", textAlign: "center", fontSize: "13px", color: nilState === 2 ? BLUE : GOLD, fontWeight: "bold" }}>BID: 0</div>
           ) : (
             <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Bid" value={bid}
-              onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) onBid(v); }}
-              style={iStyle({ borderColor: "rgba(200,168,78,0.85)", background: "rgba(200,168,78,0.14)", color: bid === "" ? "#8a9aaa" : "#e8dcc8" })} />
+              ref={bidRef}
+              onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) { onBid(v); if(v!=="" && onBidComplete) onBidComplete(); } }}
+              style={iStyle({ borderColor: isActive ? "#00e5ff" : "rgba(200,168,78,0.85)", background: isActive ? "rgba(0,229,255,0.18)" : "rgba(200,168,78,0.14)", color: bid === "" ? "#8a9aaa" : "#e8dcc8", boxShadow: isActive ? "0 0 10px rgba(0,229,255,0.5)" : "none", transition: "all 0.2s" })} />
           )}
         </div>
         <button onClick={onToggleNil} style={Object.assign({ flex: 1, minWidth: 0, borderRadius: "8px", padding: "12px 6px", fontSize: "10px", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", cursor: "pointer", fontWeight: "bold" }, ns)}>
@@ -535,7 +538,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
 
 // ─── Team Card ────────────────────────────────────────────────────────────────
 
-function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName }) {
+function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid }) {
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
@@ -581,8 +584,8 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
 
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }} />
 
-      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} />
-      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} />
+      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} />
+      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} />
 
       {warn && !setAlert && (
         <div style={{ background: RED, color: DIM, fontSize: "11px", fontWeight: "bold", textAlign: "center", padding: "9px", borderRadius: "7px", textTransform: "uppercase", letterSpacing: "1px" }}>
@@ -1546,6 +1549,10 @@ export default function App() {
   const [rules, setRules] = useState(loadSettings);
   const [showSummary, setShowSummary] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(!hasOnboarded());
+  const [showSetup, setShowSetup] = useState(false);
+  const [setupStep, setSetupStep] = useState(1);
+  const [setupSeating, setSetupSeating] = useState({ N: null, S: null, E: null, W: null, dealer: null });
+  const [setupPickingSeat, setSetupPickingSeat] = useState(null);
 
   useEffect(function() {
     if (screen === "game") {
@@ -1706,6 +1713,71 @@ export default function App() {
     try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
     setGs(newGame(gs));
     setShowSummary(false);
+    const prevSeating = gs.seating && gs.seating.dealer ? gs.seating : null;
+    if (prevSeating) {
+      setSetupSeating(prevSeating);
+    } else {
+      setSetupSeating({ N: null, S: null, E: null, W: null, dealer: null });
+    }
+    setSetupStep(1);
+    setShowSetup(true);
+  }
+
+  // ── Bid auto-advance: clockwise rotation from dealer ─────────────────────
+  const CLOCKWISE = ["N", "E", "S", "W"];
+  function getBidOrder(dealer) {
+    if (!dealer) return [];
+    const di = CLOCKWISE.indexOf(dealer);
+    return [
+      CLOCKWISE[(di + 1) % 4],
+      CLOCKWISE[(di + 2) % 4],
+      CLOCKWISE[(di + 3) % 4],
+      CLOCKWISE[di],
+    ];
+  }
+  function seatToTeamPlayer(seat, seating) {
+    const name = seating[seat];
+    for (let ti = 0; ti < gs.teams.length; ti++) {
+      if (gs.teams[ti].p[0] === name) return { ti, pi: "p1bid" };
+      if (gs.teams[ti].p[1] === name) return { ti, pi: "p2bid" };
+    }
+    return null;
+  }
+  function advanceBidSeat() {
+    if (!gs.seating || !gs.seating.dealer) return;
+    const order = getBidOrder(gs.seating.dealer);
+    const cur = gs.activeBidSeat;
+    if (!cur) {
+      upd(function(s) { return Object.assign({}, s, { activeBidSeat: order[0] }); });
+      return;
+    }
+    const idx = order.indexOf(cur);
+    const next = idx < 3 ? order[idx + 1] : null;
+    upd(function(s) { return Object.assign({}, s, { activeBidSeat: next }); });
+  }
+  function startRoundBidding() {
+    if (!gs.seating || !gs.seating.dealer) return;
+    const order = getBidOrder(gs.seating.dealer);
+    upd(function(s) { return Object.assign({}, s, { activeBidSeat: order[0] }); });
+  }
+
+  // ── Setup modal: commit seating to game state and start game ─────────────
+  function commitSetup() {
+    upd(function(s) {
+      return Object.assign({}, s, {
+        seating: setupSeating,
+        activeBidSeat: getBidOrder(setupSeating.dealer)[0],
+      });
+    });
+    setShowSetup(false);
+  }
+
+  // ── Setup modal: get all 4 player names from current gs ──────────────────
+  function getSetupPlayers() {
+    return [
+      gs.teams[0].p[0], gs.teams[0].p[1],
+      gs.teams[1].p[0], gs.teams[1].p[1],
+    ];
   }
 
   // Combined tricks across BOTH teams must total exactly 13
@@ -1812,6 +1884,9 @@ export default function App() {
               {gs.teams.map(function(team, ti) {
                 return (
                   <TeamCard key={ti + team.name + team.p[0] + team.p[1]} team={team} ti={ti} entry={gs.entry}
+                    activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false}
+                    activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false}
+                    onAdvanceBid={advanceBidSeat}
                     onToggleNil={toggleNil} onField={setField}
                     onTeamName={function(v) { setTeamName(ti, v); }}
                     onPlayerName={setPlayerName} />
@@ -1897,6 +1972,200 @@ export default function App() {
         </div>
 
       </div>
+
+      {/* Game Setup Modal */}
+      {showSetup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#0f1623", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "16px", width: "100%", maxWidth: "400px", padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+
+            {/* Progress indicator */}
+            <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
+              {[1,2,3].map(function(s) {
+                return <div key={s} style={{ width: "32px", height: "4px", borderRadius: "2px", background: s <= setupStep ? GOLD : "rgba(255,255,255,0.15)", transition: "background 0.3s" }} />;
+              })}
+            </div>
+
+            {/* Step 1: Team Names */}
+            {setupStep === 1 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "20px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>New Game</div>
+                  <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "6px" }}>Enter your team names to get started</div>
+                </div>
+                {gs.teams.map(function(team, ti) {
+                  return (
+                    <div key={ti} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <div style={{ fontSize: "11px", color: "#7a9ab8", letterSpacing: "1px", textTransform: "uppercase" }}>Team {ti + 1}</div>
+                      <input
+                        type="text"
+                        placeholder={"e.g. " + (ti === 0 ? "Debbie and Jay" : "Robbie and Shannon")}
+                        defaultValue={team.name === "Team " + (ti+1) ? "" : team.name}
+                        onChange={function(ev) {
+                          const v = ev.target.value;
+                          upd(function(s) {
+                            const teams = s.teams.map(function(t, i) {
+                              if (i !== ti) return t;
+                              const split = v.split(/\s+and\s+/i);
+                              const newP = [t.p[0], t.p[1]];
+                              if (split.length === 2) {
+                                if (isDefaultPlayerName(t.p[0])) newP[0] = split[0].trim();
+                                if (isDefaultPlayerName(t.p[1])) newP[1] = split[1].trim();
+                              }
+                              return Object.assign({}, t, { name: v, p: newP });
+                            });
+                            return Object.assign({}, s, { teams: teams });
+                          });
+                        }}
+                        style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "8px", padding: "12px 14px", fontSize: "15px", color: "#e8dcc8", outline: "none", width: "100%", boxSizing: "border-box" }}
+                      />
+                      <div style={{ fontSize: "10px", color: "#5a7a5a", fontStyle: "italic" }}>
+                        Type "Name and Name" to auto-fill players · {team.p[0]} / {team.p[1]}
+                      </div>
+                    </div>
+                  );
+                })}
+                <button
+                  onClick={function() { setSetupStep(2); }}
+                  style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "14px", fontSize: "15px", fontWeight: "bold", cursor: "pointer", letterSpacing: "1px", marginTop: "4px" }}>
+                  Next →
+                </button>
+              </div>
+            )}
+
+            {/* Step 2: Seating */}
+            {setupStep === 2 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "20px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>Seat Your Players</div>
+                  <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "6px" }}>Tap a seat, then tap a player name</div>
+                </div>
+
+                {/* Compass table diagram */}
+                <div style={{ position: "relative", width: "220px", height: "220px", margin: "0 auto" }}>
+                  {/* Table circle */}
+                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "80px", height: "80px", borderRadius: "50%", background: "rgba(200,168,78,0.08)", border: "1px solid rgba(200,168,78,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontSize: "24px" }}>♠</div>
+                  </div>
+                  {/* Seats */}
+                  {[
+                    { seat: "N", label: "North", top: "0px", left: "50%", transform: "translateX(-50%)" },
+                    { seat: "S", label: "South", bottom: "0px", left: "50%", transform: "translateX(-50%)" },
+                    { seat: "W", label: "West", top: "50%", left: "0px", transform: "translateY(-50%)" },
+                    { seat: "E", label: "East", top: "50%", right: "0px", transform: "translateY(-50%)" },
+                  ].map(function(pos) {
+                    const assigned = setupSeating[pos.seat];
+                    const isSelected = setupPickingSeat === pos.seat;
+                    return (
+                      <div key={pos.seat}
+                        onClick={function() { setSetupPickingSeat(isSelected ? null : pos.seat); }}
+                        style={{ position: "absolute", top: pos.top, bottom: pos.bottom, left: pos.left, right: pos.right, transform: pos.transform, width: "68px", height: "52px", borderRadius: "10px", border: "2px solid " + (isSelected ? "#00e5ff" : assigned ? "rgba(200,168,78,0.6)" : "rgba(255,255,255,0.15)"), background: isSelected ? "rgba(0,229,255,0.12)" : assigned ? "rgba(200,168,78,0.1)" : "rgba(255,255,255,0.04)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.2s" }}>
+                        <div style={{ fontSize: "9px", color: "#7a9ab8", letterSpacing: "1px" }}>{pos.label}</div>
+                        <div style={{ fontSize: "12px", color: assigned ? GOLD : "#3a4a5a", fontWeight: "bold", marginTop: "2px" }}>{assigned || "—"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Player picker */}
+                {setupPickingSeat && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <div style={{ fontSize: "11px", color: "#00e5ff", textAlign: "center", letterSpacing: "1px" }}>Assign to {setupPickingSeat === "N" ? "North" : setupPickingSeat === "S" ? "South" : setupPickingSeat === "E" ? "East" : "West"}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
+                      {getSetupPlayers().map(function(pname) {
+                        const alreadySeated = Object.values(setupSeating).includes(pname);
+                        return (
+                          <button key={pname}
+                            disabled={alreadySeated && setupSeating[setupPickingSeat] !== pname}
+                            onClick={function() {
+                              setSetupSeating(function(prev) {
+                                const next = Object.assign({}, prev);
+                                // Unassign from other seat if already placed
+                                Object.keys(next).forEach(function(k) { if (next[k] === pname) next[k] = null; });
+                                next[setupPickingSeat] = pname;
+                                return next;
+                              });
+                              setSetupPickingSeat(null);
+                            }}
+                            style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid " + (alreadySeated ? "rgba(255,255,255,0.1)" : "rgba(200,168,78,0.5)"), background: alreadySeated ? "rgba(255,255,255,0.03)" : "rgba(200,168,78,0.12)", color: alreadySeated ? "#3a4a5a" : GOLD, fontSize: "13px", cursor: alreadySeated ? "not-allowed" : "pointer" }}>
+                            {pname}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                  <button onClick={function() { setSetupStep(1); }} style={{ flex: 1, background: "rgba(255,255,255,0.06)", color: "#c8d8e8", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "12px", fontSize: "14px", cursor: "pointer" }}>← Back</button>
+                  <button
+                    disabled={!setupSeating.N || !setupSeating.S || !setupSeating.E || !setupSeating.W}
+                    onClick={function() { setSetupStep(3); }}
+                    style={{ flex: 2, background: (!setupSeating.N || !setupSeating.S || !setupSeating.E || !setupSeating.W) ? "rgba(200,168,78,0.3)" : GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "12px", fontSize: "14px", fontWeight: "bold", cursor: (!setupSeating.N || !setupSeating.S || !setupSeating.E || !setupSeating.W) ? "not-allowed" : "pointer" }}>
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Dealer */}
+            {setupStep === 3 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "20px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>Who Deals First?</div>
+                  <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "6px" }}>Tap the first dealer — bidding starts to their left</div>
+                </div>
+
+                {/* Dealer selection compass */}
+                <div style={{ position: "relative", width: "220px", height: "220px", margin: "0 auto" }}>
+                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "80px", height: "80px", borderRadius: "50%", background: "rgba(200,168,78,0.08)", border: "1px solid rgba(200,168,78,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontSize: "24px" }}>♠</div>
+                  </div>
+                  {[
+                    { seat: "N", top: "0px", left: "50%", transform: "translateX(-50%)" },
+                    { seat: "S", bottom: "0px", left: "50%", transform: "translateX(-50%)" },
+                    { seat: "W", top: "50%", left: "0px", transform: "translateY(-50%)" },
+                    { seat: "E", top: "50%", right: "0px", transform: "translateY(-50%)" },
+                  ].map(function(pos) {
+                    const pname = setupSeating[pos.seat];
+                    const isDealer = setupSeating.dealer === pos.seat;
+                    return (
+                      <div key={pos.seat}
+                        onClick={function() { setSetupSeating(function(prev) { return Object.assign({}, prev, { dealer: pos.seat }); }); }}
+                        style={{ position: "absolute", top: pos.top, bottom: pos.bottom, left: pos.left, right: pos.right, transform: pos.transform, width: "68px", height: "52px", borderRadius: "10px", border: "2px solid " + (isDealer ? GOLD : "rgba(255,255,255,0.15)"), background: isDealer ? "rgba(200,168,78,0.18)" : "rgba(255,255,255,0.04)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.2s" }}>
+                        {isDealer && <div style={{ fontSize: "9px", color: GOLD, letterSpacing: "1px", fontWeight: "bold" }}>DEALER</div>}
+                        <div style={{ fontSize: "12px", color: isDealer ? GOLD : "#c8d8e8", fontWeight: "bold" }}>{pname}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Bid order preview */}
+                {setupSeating.dealer && (
+                  <div style={{ background: "rgba(0,229,255,0.06)", border: "1px solid rgba(0,229,255,0.2)", borderRadius: "10px", padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ fontSize: "10px", color: "#00e5ff", letterSpacing: "2px", marginBottom: "6px" }}>HAND 1 BID ORDER</div>
+                    <div style={{ fontSize: "13px", color: "#c8d8e8" }}>
+                      {getBidOrder(setupSeating.dealer).map(function(seat, i) {
+                        return <span key={seat}>{i > 0 ? " → " : ""}<span style={{ color: GOLD, fontWeight: "bold" }}>{setupSeating[seat]}</span></span>;
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                  <button onClick={function() { setSetupStep(2); }} style={{ flex: 1, background: "rgba(255,255,255,0.06)", color: "#c8d8e8", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "12px", fontSize: "14px", cursor: "pointer" }}>← Back</button>
+                  <button
+                    disabled={!setupSeating.dealer}
+                    onClick={commitSetup}
+                    style={{ flex: 2, background: !setupSeating.dealer ? "rgba(200,168,78,0.3)" : GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "12px", fontSize: "14px", fontWeight: "bold", cursor: !setupSeating.dealer ? "not-allowed" : "pointer" }}>
+                    ♠ Start Game
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
 
       {/* Game Summary Card Modal */}
       {showSummary && gs.winner !== null && (
