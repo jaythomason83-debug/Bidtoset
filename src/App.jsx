@@ -395,8 +395,23 @@ function blank() {
 }
 
 function newGame(prev) {
-  const t0 = prev && prev.teams && prev.teams[0];
-  const t1 = prev && prev.teams && prev.teams[1];
+  // Capture prior table for "Same table?" reuse prompt.
+  // Only snapshot if prior table is non-default (real game was played).
+  var lastTable = null;
+  if (prev && prev.teams && prev.seating && prev.seating.dealer) {
+    var t0name = prev.teams[0] && prev.teams[0].name;
+    if (t0name && t0name !== "Team 1") {
+      lastTable = {
+        teams: [
+          { name: prev.teams[0].name, p: [prev.teams[0].p[0], prev.teams[0].p[1]] },
+          { name: prev.teams[1].name, p: [prev.teams[1].p[0], prev.teams[1].p[1]] },
+        ],
+        seating: Object.assign({}, prev.seating),
+      };
+    }
+  }
+  // Carry forward an existing lastTable if newGame is called twice without a played game in between.
+  if (!lastTable && prev && prev.lastTable) lastTable = prev.lastTable;
   return {
     teams: [
       { name: "Team 1", score: 0, bags: 0, p: ["Player 1", "Player 2"] },
@@ -404,8 +419,9 @@ function newGame(prev) {
     ],
     entry: [blank(), blank()],
     rounds: [], lastResult: null, winner: null, showHistory: false,
-    seating: prev && prev.seating ? prev.seating : { N: null, S: null, E: null, W: null, dealer: null },
+    seating: { N: null, S: null, E: null, W: null, dealer: null },
     activeBidSeat: null,
+    lastTable: lastTable,
   };
 }
 
@@ -1564,6 +1580,7 @@ export default function App() {
   const [setupPickingSeat, setSetupPickingSeat] = useState(null);
   const [setupPlayerNames, setSetupPlayerNames] = useState(["", "", "", ""]);
   const [setupTeamNames, setSetupTeamNames] = useState(["", ""]);
+  const [setupReuseDeclined, setSetupReuseDeclined] = useState(false);
   useEffect(function() {
     if (showSetup) {
       function splitTeam(t) {
@@ -1573,6 +1590,7 @@ export default function App() {
       }
       setSetupPlayerNames(["", "", "", ""]);
       setSetupTeamNames(["", ""]);
+      setSetupReuseDeclined(false);
     }
   }, [showSetup]);
 
@@ -2025,11 +2043,48 @@ export default function App() {
             {/* Step 1: Team Names */}
             {setupStep === 1 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {gs.lastTable && !setupReuseDeclined && (
+                  <div style={{ background: "rgba(200,168,78,0.08)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "12px", padding: "18px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "18px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>Same Table?</div>
+                      <div style={{ fontSize: "12px", color: "#c0d0e0", marginTop: "8px", fontStyle: "italic" }}>
+                        {gs.lastTable.teams[0].name} vs {gs.lastTable.teams[1].name}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                      <button
+                        onClick={function() {
+                          var lt = gs.lastTable;
+                          setSetupTeamNames([lt.teams[0].name, lt.teams[1].name]);
+                          setSetupPlayerNames([lt.teams[0].p[0], lt.teams[0].p[1], lt.teams[1].p[0], lt.teams[1].p[1]]);
+                          setSetupSeating(Object.assign({}, lt.seating));
+                          upd(function(s) {
+                            var newTeams = [
+                              Object.assign({}, s.teams[0], { name: lt.teams[0].name, p: [lt.teams[0].p[0], lt.teams[0].p[1]] }),
+                              Object.assign({}, s.teams[1], { name: lt.teams[1].name, p: [lt.teams[1].p[0], lt.teams[1].p[1]] }),
+                            ];
+                            return Object.assign({}, s, { teams: newTeams });
+                          });
+                          setSetupStep(2);
+                        }}
+                        style={{ flex: 1, background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "14px", fontSize: "14px", fontWeight: "bold", cursor: "pointer", letterSpacing: "1px" }}>
+                        Same Table
+                      </button>
+                      <button
+                        onClick={function() { setSetupReuseDeclined(true); }}
+                        style={{ flex: 1, background: "rgba(255,255,255,0.06)", color: "#c8d8e8", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "10px", padding: "14px", fontSize: "14px", cursor: "pointer", letterSpacing: "1px" }}>
+                        New Table
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {(!gs.lastTable || setupReuseDeclined) && (
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: "20px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>New Game</div>
                   <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "6px" }}>Enter your team names to get started</div>
                 </div>
-                {gs.teams.map(function(team, ti) {
+                )}
+                {(!gs.lastTable || setupReuseDeclined) && gs.teams.map(function(team, ti) {
                   return (
                     <div key={ti} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                       <div style={{ fontSize: "11px", color: "#7a9ab8", letterSpacing: "1px", textTransform: "uppercase" }}>Team {ti + 1}</div>
@@ -2081,11 +2136,13 @@ export default function App() {
                     </div>
                   );
                 })}
+                {(!gs.lastTable || setupReuseDeclined) && (
                 <button
                   onClick={function() { setSetupStep(2); }}
                   style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "14px", fontSize: "15px", fontWeight: "bold", cursor: "pointer", letterSpacing: "1px", marginTop: "4px" }}>
                   Next →
                 </button>
+                )}
               </div>
             )}
 
