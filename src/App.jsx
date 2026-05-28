@@ -2071,7 +2071,21 @@ export default function App() {
                         Same Table
                       </button>
                       <button
-                        onClick={function() { setSetupReuseDeclined(true); }}
+                        onClick={function() {
+                          setSetupReuseDeclined(true);
+                          setSetupTeamNames(["", ""]);
+                          setSetupPlayerNames(["", "", "", ""]);
+                          setSetupSeating({ N: null, S: null, E: null, W: null, dealer: null });
+                          upd(function(s) {
+                            return Object.assign({}, s, {
+                              teams: [
+                                { name: "Team 1", score: 0, bags: 0, p: ["Player 1", "Player 2"] },
+                                { name: "Team 2", score: 0, bags: 0, p: ["Player 3", "Player 4"] },
+                              ],
+                              seating: { N: null, S: null, E: null, W: null, dealer: null },
+                            });
+                          });
+                        }}
                         style={{ flex: 1, background: "rgba(255,255,255,0.06)", color: "#c8d8e8", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "10px", padding: "14px", fontSize: "14px", cursor: "pointer", letterSpacing: "1px" }}>
                         New Table
                       </button>
