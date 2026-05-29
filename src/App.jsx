@@ -2200,10 +2200,10 @@ export default function App() {
                     <div style={{ fontSize: "11px", color: "#00e5ff", textAlign: "center", letterSpacing: "1px" }}>Assign to {setupPickingSeat === "N" ? "North" : setupPickingSeat === "S" ? "South" : setupPickingSeat === "E" ? "East" : "West"}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
                       {getSetupPlayers().map(function(pname) {
-                        const alreadySeated = Object.values(setupSeating).includes(pname);
+                        const alreadySeated = Object.values(setupSeating).includes(pname);                         const pIdx = setupPlayerNames.indexOf(pname);                         const mateIdx = pIdx >= 0 ? (pIdx % 2 === 0 ? pIdx + 1 : pIdx - 1) : -1;                         const mateName = mateIdx >= 0 ? setupPlayerNames[mateIdx] : null;                         let mateSeat = null;                         if (mateName) { ["N","S","E","W"].forEach(function(k){ if (setupSeating[k] === mateName) mateSeat = k; }); }                         const across = { N: "S", S: "N", E: "W", W: "E" };                         const blocked = mateSeat && setupPickingSeat && across[mateSeat] !== setupPickingSeat && setupSeating[setupPickingSeat] !== pname;
                         return (
                           <button key={pname}
-                            disabled={alreadySeated && setupSeating[setupPickingSeat] !== pname}
+                            disabled={(alreadySeated && setupSeating[setupPickingSeat] !== pname) || blocked}
                             onClick={function() {
                               setSetupSeating(function(prev) {
                                 const next = Object.assign({}, prev);
