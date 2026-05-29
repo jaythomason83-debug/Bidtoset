@@ -4,7 +4,7 @@ const WINNING_SCORE = 500;
 const LOSING_SCORE = -200;
 const BAG_LIMIT = 10;
 const BAG_PENALTY = -100;
-const STORAGE_KEY = "spades_v13";
+const STORAGE_KEY = "spades_v13"; 
 const HISTORY_KEY = "spades_history_v1";
 const SETTINGS_KEY = "spades_settings_v1";
 const INSTALL_DISMISSED_KEY = "bidtoset_install_dismissed_v1";
@@ -514,14 +514,14 @@ function EditableName({ value, onChange, style }) {
 
 // ─── Player Row ───────────────────────────────────────────────────────────────
 
-function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef }) {
+function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer }) {
   const ns = nilBtnStyle(nilState);
   const isNil = nilState > 0;
 
   return (
     <div style={{ background: "rgba(0,0,0,0.2)", border: "1px solid " + (nilState === 2 ? "rgba(0,191,255,0.2)" : nilState === 1 ? "rgba(200,168,78,0.15)" : "rgba(255,255,255,0.05)"), borderRadius: "10px", padding: "11px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: "22px" }}>
-        <EditableName value={name} onChange={onNameChange} style={{ fontSize: "12px", color: "#c8d8e8", letterSpacing: "1px", flex: 1 }} />
+        <EditableName value={name} onChange={onNameChange} style={{ fontSize: "12px", color: "#c8d8e8", letterSpacing: "1px", flex: 1 }} />         {isDealer && (<div style={{ fontSize: "9px", padding: "2px 8px", borderRadius: "4px", fontWeight: "bold", flexShrink: 0, marginLeft: "6px", background: "rgba(200,168,78,0.15)", color: GOLD, border: "1px solid rgba(200,168,78,0.4)", letterSpacing: "1px" }}>DEALER</div>)}
         {nilState > 0 && (
           <div style={{ fontSize: "9px", padding: "2px 8px", borderRadius: "4px", fontWeight: "bold", flexShrink: 0, marginLeft: "8px", background: nilState === 2 ? "rgba(0,191,255,0.15)" : "rgba(200,168,78,0.15)", color: nilState === 2 ? BLUE : GOLD }}>
             {nilState === 2 ? "BLIND +/-200" : "NIL +/-100"}
@@ -554,7 +554,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
 
 // ─── Team Card ────────────────────────────────────────────────────────────────
 
-function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid }) {
+function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2 }) {
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
@@ -600,8 +600,8 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
 
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }} />
 
-      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} />
-      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} />
+      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} />
+      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} />
 
       {warn && !setAlert && (
         <div style={{ background: RED, color: DIM, fontSize: "11px", fontWeight: "bold", textAlign: "center", padding: "9px", borderRadius: "7px", textTransform: "uppercase", letterSpacing: "1px" }}>
@@ -1939,8 +1939,8 @@ export default function App() {
               {gs.teams.map(function(team, ti) {
                 return (
                   <TeamCard key={ti + team.name + team.p[0] + team.p[1]} team={team} ti={ti} entry={gs.entry}
-                    activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false}
-                    activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false}
+                    activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false} isDealerP1={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[0] : false}
+                    activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false} isDealerP2={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[1] : false}
                     onAdvanceBid={advanceBidSeat}
                     onToggleNil={toggleNil} onField={setField}
                     onTeamName={function(v) { setTeamName(ti, v); }}
