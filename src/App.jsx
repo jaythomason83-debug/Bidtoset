@@ -1564,6 +1564,7 @@ function OnboardingOverlay({ onDismiss }) {
 export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
+  const [scoreShake, setScoreShake] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
@@ -1980,13 +1981,14 @@ export default function App() {
               <BagLadyWarning teams={gs.teams} bagLimit={rules.bagLimit} />
               <MercyRuleBanner teams={gs.teams} />
 
-              <button onClick={scoreRound} disabled={!canScore} style={{
+              <button onClick={function(){ if (canScore) { scoreRound(); } else { hapticPulse([50,40,50,40,70]); setScoreShake(true); setTimeout(function(){ setScoreShake(false); }, 450); } }} disabled={false} style={{
                 background: scoreBtnBg, color: canScore ? DIM : "#c8d8e8", border: "none", borderRadius: "10px",
                 padding: "16px", fontSize: "15px", fontFamily: "Georgia, serif",
                 fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase",
                 cursor: canScore ? "pointer" : "not-allowed", width: "100%",
                 opacity: canScore ? 1 : 0.85,
                 boxShadow: canScore ? (anySet ? "0 0 20px rgba(232,148,58,0.5)" : anyBlindNil && !anyBidOne ? "0 0 20px rgba(0,191,255,0.4)" : "0 0 14px rgba(200,168,78,0.25)") : "none",
+                animation: scoreShake ? "shakeX 0.45s ease-in-out" : "none",
               }}>
                 {scoreBtnLabel}
               </button>
@@ -2345,6 +2347,7 @@ export default function App() {
         @keyframes flashOrange { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
         @keyframes flashBlue { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
         @keyframes flashRed { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
+        @keyframes shakeX { 0%,100%{transform:translateX(0)} 15%{transform:translateX(-9px)} 30%{transform:translateX(9px)} 45%{transform:translateX(-7px)} 60%{transform:translateX(7px)} 75%{transform:translateX(-4px)} 90%{transform:translateX(4px)} }
         input:focus { outline: none !important; border-color: #c8a84e !important; }
         input::placeholder { color: #a0b4c8; }
         input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; }
