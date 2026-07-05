@@ -1745,11 +1745,17 @@ export default function App() {
       });
     });
   }
+  function confirmNewGame() {
+    var msg = gs.winner !== null
+      ? "Start a new game? This game is saved to History."
+      : "Start a new game? This unfinished game won't be saved.";
+    return confirm(msg);
+  }
   function reset() {
-    if (gs.rounds.length > 0 && gs.winner === null) {
-      const gameRecord = buildGameRecord(gs, gs.winner);
-      saveGameToHistory(gameRecord);
-    }
+    // History = completed games only. Completed games are saved in scoreRound()
+    // when a winner is detected. Abandoned/incomplete games are intentionally not
+    // archived here (they clutter History and pollute stats). When multi-game lands,
+    // in-progress games get parked in a separate resumable store, not History.
     try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
     setGs(newGame(gs));
     setShowSummary(false);
@@ -1861,7 +1867,7 @@ export default function App() {
             <div style={{ fontSize: "18px", letterSpacing: "4px", color: GOLD, fontVariant: "small-caps", textShadow: "0 0 20px rgba(200,168,78,0.4)" }}>Scorekeeper</div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <div style={{ fontSize: "9px", color: savedFlash ? GREEN : "#1a2a3a", transition: "color 0.3s" }}>{savedFlash ? "saved" : "auto"}</div>
-              <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "rgba(200,168,78,0.1)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "6px", padding: "4px 10px", fontSize: "9px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>New Game</button>
+              <button onClick={function() { if (gs.rounds.length === 0 || confirmNewGame()) reset(); }} style={{ background: "rgba(200,168,78,0.1)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "6px", padding: "4px 10px", fontSize: "9px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>New Game</button>
             </div>
           </div>
 
@@ -2016,7 +2022,7 @@ export default function App() {
           )}
 
           {gs.winner === null && (
-            <button onClick={function() { if (gs.rounds.length === 0 || confirm("Reset game? All scoring data for this game will be lost.")) reset(); }} style={{ background: "rgba(200,168,78,0.12)", color: GOLD, border: "1px solid rgba(200,168,78,0.4)", borderRadius: "8px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%", fontWeight: "bold" }}>
+            <button onClick={function() { if (gs.rounds.length === 0 || confirmNewGame()) reset(); }} style={{ background: "rgba(200,168,78,0.12)", color: GOLD, border: "1px solid rgba(200,168,78,0.4)", borderRadius: "8px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", width: "100%", fontWeight: "bold" }}>
               Reset Game
             </button>
           )}
