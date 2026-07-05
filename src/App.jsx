@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { supabase } from "./lib/supabase";
 
 const WINNING_SCORE = 500;
 const LOSING_SCORE = -200;
@@ -65,6 +66,34 @@ function buildGameRecord(gs, winner) {
   };
 }
 
+
+// ─── Cloud sync (Supabase) ─────────────────────────────────
+// Local-first: localStorage stays the instant source of truth; the cloud push
+// is best-effort background backup. Every failure is swallowed so the app keeps
+// working fully offline. Idempotent upsert on (owner_id, client_id).
+async function ensureAnonSession() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (!data || !data.session) await supabase.auth.signInAnonymously();
+  } catch (_) {}
+}
+async function pushGameToCloud(gameRecord, rules) {
+  try {
+    const { data } = await supabase.auth.getUser();
+    const user = data && data.user;
+    if (!user || !gameRecord) return;
+    await supabase.from("games").upsert({
+      owner_id: user.id,
+      client_id: gameRecord.id,
+      played_at: new Date(gameRecord.id).toISOString(),
+      winner_team: gameRecord.winner,
+      total_rounds: gameRecord.totalRounds,
+      teams: gameRecord.teams,
+      rounds: gameRecord.rounds,
+      rules: rules || null,
+    }, { onConflict: "owner_id,client_id" });
+  } catch (_) {}
+}
 
 function hapticPulse(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(_) {} }
 function isRedditName(n) { if (!n) return false; const s = String(n).trim().toLowerCase(); return s === "reddit" || s === "snoo"; }
@@ -1565,6 +1594,7 @@ export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
   const [scoreShake, setScoreShake] = useState(false);
+  useEffect(function() { ensureAnonSession(); }, []);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
@@ -1706,6 +1736,7 @@ export default function App() {
           winner
         );
         saveGameToHistory(gameRecord);
+        pushGameToCloud(gameRecord, rules);
         // Trigger summary card
         setTimeout(function() { setShowSummary(true); }, 800);
       }
