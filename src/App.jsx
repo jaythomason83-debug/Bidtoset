@@ -514,7 +514,7 @@ function EditableName({ value, onChange, style }) {
 
 // ─── Player Row ───────────────────────────────────────────────────────────────
 
-function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer }) {
+function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer, seat, bidRefs }) {
   const ns = nilBtnStyle(nilState);
   const isNil = nilState > 0;
 
@@ -535,8 +535,8 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
             <div style={{ background: nilState === 2 ? "rgba(0,191,255,0.1)" : "rgba(200,168,78,0.1)", border: "1px solid " + (nilState === 2 ? "rgba(0,191,255,0.3)" : "rgba(200,168,78,0.3)"), borderRadius: "8px", padding: "12px 8px", textAlign: "center", fontSize: "13px", color: nilState === 2 ? BLUE : GOLD, fontWeight: "bold" }}>BID: 0</div>
           ) : (
             <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Bid" value={bid}
-              ref={bidRef}
-              onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) { onBid(v); if(v!=="" && onBidComplete) onBidComplete(); } }}
+              ref={function(el){ if(bidRefs && seat){ bidRefs.current[seat] = el; } }}
+              onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) { var wasEmpty = (bid===""); onBid(v); if(v!=="" && wasEmpty && isActive && onBidComplete) onBidComplete(); } }}
               style={iStyle({ borderColor: isActive ? "#00e5ff" : "rgba(200,168,78,0.85)", background: isActive ? "rgba(0,229,255,0.18)" : "rgba(200,168,78,0.14)", color: bid === "" ? "#8a9aaa" : "#e8dcc8", boxShadow: isActive ? "0 0 10px rgba(0,229,255,0.5)" : "none", transition: "all 0.2s" })} />
           )}
         </div>
@@ -554,7 +554,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
 
 // ─── Team Card ────────────────────────────────────────────────────────────────
 
-function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2 }) {
+function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2, seatP1, seatP2, bidRefs }) {
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
@@ -600,8 +600,8 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
 
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }} />
 
-      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} />
-      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} />
+      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} seat={seatP1} bidRefs={bidRefs} />
+      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} seat={seatP2} bidRefs={bidRefs} />
 
       {warn && !setAlert && (
         <div style={{ background: RED, color: DIM, fontSize: "11px", fontWeight: "bold", textAlign: "center", padding: "9px", borderRadius: "7px", textTransform: "uppercase", letterSpacing: "1px" }}>
@@ -1563,6 +1563,7 @@ function OnboardingOverlay({ onDismiss }) {
 
 export default function App() {
   const [gs, setGs] = useState(load);
+  const bidRefs = useRef({});
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
@@ -1619,8 +1620,13 @@ export default function App() {
   }
 
   function toggleNil(ti, pnum) {
+    // Detect (before the update) whether the ACTIVE player is declaring Nil for the
+    // first time this turn (0 -> nonzero), so we can advance the prompt like a bid.
+    const nilField = pnum === 1 ? "p1nil" : "p2nil";
+    const playerName = gs.teams[ti] ? gs.teams[ti].p[pnum - 1] : null;
+    const activeName = (gs.seating && gs.activeBidSeat) ? gs.seating[gs.activeBidSeat] : null;
+    const wasZero = !(gs.entry[ti] && gs.entry[ti][nilField] > 0);
     upd(function(s) {
-      const nilField = pnum === 1 ? "p1nil" : "p2nil";
       const bidField = pnum === 1 ? "p1bid" : "p2bid";
       const entry = s.entry.map(function(e, i) {
         if (i !== ti) return e;
@@ -1629,6 +1635,10 @@ export default function App() {
       });
       return Object.assign({}, s, { entry: entry });
     });
+    // Active player just declared Nil (0 -> Nil): advance prompt + focus like a bid.
+    if (playerName && activeName && playerName === activeName && wasZero) {
+      advanceBidSeat();
+    }
   }
 
   function setTeamName(ti, val) {
@@ -1706,12 +1716,20 @@ export default function App() {
         }),
       };
 
+      // Dealer rotation: the deal passes clockwise each hand. Rotate the dealer and
+      // reset the bid highlight to the new first bidder (seat left of dealer) so the
+      // next round starts prompting the right player automatically.
+      const _curDealer = (s.seating && s.seating.dealer) ? s.seating.dealer : null;
+      const _nextDealer = _curDealer ? CLOCKWISE[(CLOCKWISE.indexOf(_curDealer) + 1) % 4] : null;
+      const _continue = winner === null;
       return Object.assign({}, s, {
         teams: newTeams,
         rounds: s.rounds.concat([round]),
         entry: [blank(), blank()],
         lastResult: lastResult,
         winner: winner,
+        seating: (_continue && _nextDealer) ? Object.assign({}, s.seating, { dealer: _nextDealer }) : s.seating,
+        activeBidSeat: (_continue && _nextDealer) ? getBidOrder(_nextDealer)[0] : s.activeBidSeat,
       });
     });
   }
@@ -1798,17 +1816,22 @@ export default function App() {
     }
     return null;
   }
+  function focusBid(seat) {
+    try { var el = seat ? bidRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
+  }
   function advanceBidSeat() {
     if (!gs.seating || !gs.seating.dealer) return;
     const order = getBidOrder(gs.seating.dealer);
     const cur = gs.activeBidSeat;
     if (!cur) {
       upd(function(s) { return Object.assign({}, s, { activeBidSeat: order[0] }); });
+      focusBid(order[0]);
       return;
     }
     const idx = order.indexOf(cur);
     const next = idx < 3 ? order[idx + 1] : null;
     upd(function(s) { return Object.assign({}, s, { activeBidSeat: next }); });
+    focusBid(next);
   }
   function startRoundBidding() {
     if (!gs.seating || !gs.seating.dealer) return;
@@ -1947,7 +1970,7 @@ export default function App() {
                   <TeamCard key={ti + team.name + team.p[0] + team.p[1]} team={team} ti={ti} entry={gs.entry}
                     activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false} isDealerP1={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[0] : false}
                     activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false} isDealerP2={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[1] : false}
-                    onAdvanceBid={advanceBidSeat}
+                    onAdvanceBid={advanceBidSeat} seatP1={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[0]; }) || null) : null} seatP2={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[1]; }) || null) : null} bidRefs={bidRefs}
                     onToggleNil={toggleNil} onField={setField}
                     onTeamName={function(v) { setTeamName(ti, v); }}
                     onPlayerName={setPlayerName} />
