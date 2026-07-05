@@ -1750,7 +1750,7 @@ export default function App() {
       const gameRecord = buildGameRecord(gs, gs.winner);
       saveGameToHistory(gameRecord);
     }
-    try { localStorage.clear(); } catch(_) {}
+    try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
     setGs(newGame(gs));
     setShowSummary(false);
     const prevSeating = gs.seating && gs.seating.dealer ? gs.seating : null;
