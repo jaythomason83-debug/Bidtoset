@@ -365,7 +365,7 @@ function buildGameSummary(gs, rules) {
 
   function getP(name) {
     if (!playerMap[name]) {
-      playerMap[name] = { name: name, totalBid: 0, totalTricks: 0, totalTricksForDW: 0, teamTotalTricksDW: 0, madeBid: 0, overBid: 0, underBid: 0, bags: 0, pts: 0, rounds: 0, teamName: "" };
+      playerMap[name] = { name: name, teamName: "", value: 0, trickTricks: 0, trickBidRounds: 0, bags: 0, rounds: 0, madeBid: 0, overBid: 0, underBid: 0, nilMade: 0, nilFailed: 0, blindMade: 0, blindFailed: 0 };
     }
     return playerMap[name];
   }
@@ -375,74 +375,98 @@ function buildGameSummary(gs, rules) {
     var p2 = getP(team.p[1]); p2.teamName = team.name;
 
     gs.rounds.forEach(function(round) {
-      var entry = round.entry[ti];
-      var result = round.results[ti];
-      if (!entry || !result) return;
-
-      // P1
-      p1.rounds++;
-      p1.pts += result.pts / 2; // approximate split
-      if (entry.p1nil === 0) {
-        var b1 = parseInt(entry.p1bid) || 0;
-        var t1 = parseInt(entry.p1tricks) || 0;
-        p1.totalBid += b1; p1.totalTricks += t1;
-        if (t1 === b1) p1.madeBid++;
-        else if (t1 > b1) { p1.overBid++; p1.bags += (t1 - b1); }
-        else p1.underBid++;
+      var e = round.entry[ti];
+      if (!e) return;
+      var p1nil = e.p1nil > 0, p2nil = e.p2nil > 0;
+      var t1 = parseInt(e.p1tricks) || 0, t2 = parseInt(e.p2tricks) || 0;
+      var b1 = p1nil ? 0 : (parseInt(e.p1bid) || 0);
+      var b2 = p2nil ? 0 : (parseInt(e.p2bid) || 0);
+      var teamBid = b1 + b2;
+      var bidTricks = (p1nil ? 0 : t1) + (p2nil ? 0 : t2);
+      var bothNil = p1nil && p2nil;
+      // Joint team-bid points (mirrors scoreTeam), then split by a blend of bid + trick share.
+      var teamBidPts = 0;
+      if (!bothNil) { teamBidPts = (bidTricks >= teamBid) ? (teamBid * 10 + (bidTricks - teamBid)) : (-teamBid * 10); }
+      var nonNil = (p1nil ? 0 : 1) + (p2nil ? 0 : 1);
+      function shareOf(isNil, myBid, myTricks) {
+        if (isNil || nonNil === 0) return 0;
+        var bidS = teamBid > 0 ? myBid / teamBid : 1 / nonNil;
+        var trkS = bidTricks > 0 ? myTricks / bidTricks : 1 / nonNil;
+        return (bidS + trkS) / 2;
       }
-
-      // P2
-      p2.rounds++;
-      p2.pts += result.pts / 2;
-      if (entry.p2nil === 0) {
-        var b2 = parseInt(entry.p2bid) || 0;
-        var t2 = parseInt(entry.p2tricks) || 0;
-        p2.totalBid += b2; p2.totalTricks += t2;
-        if (t2 === b2) p2.madeBid++;
-        else if (t2 > b2) { p2.overBid++; p2.bags += (t2 - b2); }
-        else p2.underBid++;
+      function apply(p, nilState, isNil, tricks, myBid, sh) {
+        p.rounds++;
+        if (isNil) {
+          var val = nilState === 2 ? 200 : 100;
+          if (tricks === 0) { p.value += val; if (nilState === 2) p.blindMade++; else p.nilMade++; }
+          else { p.value -= val; p.bags += tricks; if (nilState === 2) p.blindFailed++; else p.nilFailed++; }
+        } else {
+          p.value += teamBidPts * sh;
+          p.trickBidRounds++; p.trickTricks += tricks;
+          if (tricks === myBid) p.madeBid++;
+          else if (tricks > myBid) { p.overBid++; p.bags += (tricks - myBid); }
+          else p.underBid++;
+        }
       }
+      apply(p1, e.p1nil, p1nil, t1, b1, shareOf(p1nil, b1, t1));
+      apply(p2, e.p2nil, p2nil, t2, b2, shareOf(p2nil, b2, t2));
     });
   });
 
   const allPlayers = Object.values(playerMap);
 
-  // Compute accuracy & normalized pts for MVP weighting
-  const maxPts = Math.max(...allPlayers.map(function(p) { return p.pts; }), 1);
   allPlayers.forEach(function(p) {
     var br = p.madeBid + p.overBid + p.underBid;
     p.bidAccuracy = br > 0 ? Math.round((p.madeBid / br) * 100) : 0;
     p.sandbagRate = br > 0 ? Math.round((p.overBid / br) * 100) : 0;
-    var normalizedPts = (p.pts / maxPts) * 100;
-    // 65% bid accuracy, 35% points contribution
-    p.mvpScore = (p.bidAccuracy * 0.65) + (normalizedPts * 0.35);
+    p.nilMades = p.nilMade + p.blindMade;
+    p.nilFails = p.nilFailed + p.blindFailed;
+    p.nilAttempts = p.nilMades + p.nilFails;
   });
 
-  // MVP = highest weighted score
-  const mvp = allPlayers.reduce(function(best, p) { return p.mvpScore > best.mvpScore ? p : best; }, allPlayers[0]);
+  // MVP = highest nil-aware value (points put on the board); ties -> better bid accuracy.
+  const mvp = allPlayers.reduce(function(best, p) {
+    if (!best) return p;
+    if (p.value > best.value) return p;
+    if (p.value === best.value && p.bidAccuracy > best.bidAccuracy) return p;
+    return best;
+  }, null);
 
   // Cross-game sandbagger from history
   const history = loadHistory();
   const crossGameStats = buildPlayerStats(history);
   const sandbaggers = crossGameStats.filter(function(p) { return p.isSandbagger; });
 
-  // Most bags this game (for game-level callout)
-  const mostBagsPlayer = allPlayers.reduce(function(worst, p) { return p.bags > worst.bags ? p : worst; }, allPlayers[0]);
+  // Most bags this game
+  const mostBagsPlayer = allPlayers.reduce(function(worst, p) { return (!worst || p.bags > worst.bags) ? p : worst; }, null);
 
-  // Contribution: each player's share of their TEAM's tricks this game.
-  const teamTricks = {};
-  allPlayers.forEach(function(p) { teamTricks[p.teamName] = (teamTricks[p.teamName] || 0) + p.totalTricks; });
+  // Heavy Lifter / Dead Weight = trick-taking labor, measured only over rounds the player
+  // actually bid tricks (nil rounds excluded), so a successful nil never reads as dead weight.
+  const teamTrick = {};
+  allPlayers.forEach(function(p) { teamTrick[p.teamName] = (teamTrick[p.teamName] || 0) + p.trickTricks; });
   allPlayers.forEach(function(p) {
-    var tt = teamTricks[p.teamName] || 0;
-    p.contribution = tt > 0 ? Math.round((p.totalTricks / tt) * 100) : 50;
+    var tt = teamTrick[p.teamName] || 0;
+    p.contribution = tt > 0 ? Math.round((p.trickTricks / tt) * 100) : 50;
   });
-  const byContribution = allPlayers.slice().sort(function(a, b) { return b.contribution - a.contribution; });
-  const topC = byContribution[0];
-  const botC = byContribution[byContribution.length - 1];
-  const heavyLifter = (topC && topC.contribution >= 60) ? topC : null;
-  const deadWeight = (botC && botC.contribution <= 40) ? botC : null;
+  const gameRounds = gs.rounds ? gs.rounds.length : 0;
+  const enoughRounds = gameRounds >= 4;
+  // Ineligible if the player nilled most of the game (they weren't trying for tricks).
+  const eligible = allPlayers.filter(function(p) { return p.trickBidRounds > 0 && p.trickBidRounds >= Math.ceil(gameRounds / 2); });
+  const byC = eligible.slice().sort(function(a, b) { return b.contribution - a.contribution; });
+  const topC = byC[0], botC = byC[byC.length - 1];
+  const heavyLifter = (enoughRounds && topC && topC.contribution >= 60) ? topC : null;
+  const deadWeight = (enoughRounds && botC && topC && botC !== topC && botC.contribution <= 40) ? botC : null;
 
-  return { allPlayers, mvp, sandbaggers, mostBagsPlayer, heavyLifter, deadWeight };
+  // Nil recognition: celebrate a made nil / roast a blown one. Blind counts double.
+  var nilMaster = null, nilBust = null;
+  allPlayers.forEach(function(p) {
+    var made = p.blindMade * 2 + p.nilMade;
+    var fail = p.blindFailed * 2 + p.nilFailed;
+    if (made > 0 && (!nilMaster || made > (nilMaster.blindMade * 2 + nilMaster.nilMade))) nilMaster = p;
+    if (fail > 0 && (!nilBust || fail > (nilBust.blindFailed * 2 + nilBust.nilFailed))) nilBust = p;
+  });
+
+  return { allPlayers, mvp, sandbaggers, mostBagsPlayer, heavyLifter, deadWeight, nilMaster, nilBust };
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1040,6 +1064,8 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
       summary.mostBagsPlayer.bags > 0 ? ("🎒 Most Bags: " + summary.mostBagsPlayer.name + " (" + summary.mostBagsPlayer.bags + " bags)") : "",
       summary.heavyLifter ? ("💪 Heavy Lifter: " + summary.heavyLifter.name + " (" + summary.heavyLifter.contribution + "% of team tricks)") : "",
       summary.deadWeight ? ("⚓ Dead Weight: " + summary.deadWeight.name + " (" + summary.deadWeight.contribution + "% of team tricks)") : "",
+      summary.nilMaster ? ("🎯 Nil Master: " + summary.nilMaster.name) : "",
+      summary.nilBust ? ("💥 Blew the Nil: " + summary.nilBust.name) : "",
       summary.sandbaggers.length > 0 ? ("⚠️ Sandbagger Alert: " + summary.sandbaggers.map(function(p) { return p.name; }).join(", ")) : "",
       "",
       gs.shareCode ? ("Full recap: " + gameViewUrl(gs.shareCode)) : "",
@@ -1083,15 +1109,15 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
       center("vs " + loser.name + " — " + loser.score, 640, 32, "#8a9aaa", "", "Arial, sans-serif");
       center(gs.rounds.length + " rounds", 685, 26, "#5a6a7a", "", "Arial, sans-serif");
     }
-    let y = 800;
+    let y = 770;
     function row(label, name, detail, color) {
       g.textAlign = "left";
       g.fillStyle = color; g.font = "bold 28px Arial, sans-serif"; g.fillText(label, 130, y);
       g.fillStyle = "#e6edf5"; g.font = "bold 44px Georgia, serif"; g.fillText(name, 130, y + 52);
       g.fillStyle = "#8a9aaa"; g.font = "26px Arial, sans-serif"; g.fillText(detail, 130, y + 92);
-      y += 138;
+      y += 120;
     }
-    if (summary.mvp) row("MVP", summary.mvp.name, summary.mvp.bidAccuracy + "% bid accuracy", "#6dbf8e");
+    if (summary.mvp) row("MVP", summary.mvp.name, (summary.mvp.nilMades > 0 ? (summary.mvp.nilMades + " nil" + (summary.mvp.nilMades > 1 ? "s" : "") + " made") : (summary.mvp.bidAccuracy + "% bid accuracy")), "#6dbf8e");
     if (summary.heavyLifter) row("HEAVY LIFTER", summary.heavyLifter.name, summary.heavyLifter.contribution + "% of team tricks", "#6dbf8e");
     if (summary.deadWeight) row("DEAD WEIGHT", summary.deadWeight.name, summary.deadWeight.contribution + "% of team tricks", "#e05c5c");
     if (summary.mostBagsPlayer && summary.mostBagsPlayer.bags > 0) row("MOST BAGS", summary.mostBagsPlayer.name, summary.mostBagsPlayer.bags + " bags", "#e8943a");
@@ -1156,7 +1182,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
           <div>
             <div style={{ fontSize: "10px", color: "#4a8a6a", letterSpacing: "2px" }}>MOST VALUABLE PLAYER</div>
             <div style={{ fontSize: "16px", color: GREEN, fontWeight: "bold" }}>{summary.mvp.name}</div>
-            <div style={{ fontSize: "11px", color: "#6a9a7a" }}>{summary.mvp.bidAccuracy}% bid accuracy · {summary.mvp.teamName}</div>
+            <div style={{ fontSize: "11px", color: "#6a9a7a" }}>{summary.mvp.nilMades > 0 ? (summary.mvp.nilMades + " nil" + (summary.mvp.nilMades > 1 ? "s" : "") + " made") : (summary.mvp.bidAccuracy + "% bid accuracy")} · {summary.mvp.teamName}</div>
           </div>
         </div>
 
@@ -1189,6 +1215,27 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
               <div style={{ fontSize: "10px", color: "#8a2a2a", letterSpacing: "2px" }}>DEAD WEIGHT</div>
               <div style={{ fontSize: "16px", color: RED, fontWeight: "bold" }}>{summary.deadWeight.name}</div>
               <div style={{ fontSize: "11px", color: "#8a4a4a" }}>{summary.deadWeight.contribution}% of team tricks · got carried</div>
+            </div>
+          </div>
+        )}
+
+        {summary.nilMaster && (
+          <div style={{ background: "rgba(0,191,255,0.07)", border: "1px solid rgba(0,191,255,0.25)", borderRadius: "10px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ fontSize: "24px" }}>🎯</div>
+            <div>
+              <div style={{ fontSize: "10px", color: "#4a7a9a", letterSpacing: "2px" }}>NIL MASTER</div>
+              <div style={{ fontSize: "16px", color: BLUE, fontWeight: "bold" }}>{summary.nilMaster.name}</div>
+              <div style={{ fontSize: "11px", color: "#6a8a9a" }}>{summary.nilMaster.blindMade > 0 ? (summary.nilMaster.blindMade + " blind nil" + (summary.nilMaster.blindMade > 1 ? "s" : "") + " nailed") : (summary.nilMaster.nilMade + " nil" + (summary.nilMaster.nilMade > 1 ? "s" : "") + " made")}</div>
+            </div>
+          </div>
+        )}
+        {summary.nilBust && (
+          <div style={{ background: "rgba(224,92,92,0.07)", border: "1px solid rgba(224,92,92,0.22)", borderRadius: "10px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ fontSize: "24px" }}>💥</div>
+            <div>
+              <div style={{ fontSize: "10px", color: "#8a2a2a", letterSpacing: "2px" }}>BLEW THE NIL</div>
+              <div style={{ fontSize: "16px", color: RED, fontWeight: "bold" }}>{summary.nilBust.name}</div>
+              <div style={{ fontSize: "11px", color: "#8a4a4a" }}>{summary.nilBust.blindFailed > 0 ? "blind nil went down in flames" : "couldn't keep it clean"}</div>
             </div>
           </div>
         )}
