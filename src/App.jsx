@@ -77,21 +77,152 @@ async function ensureAnonSession() {
     if (!data || !data.session) await supabase.auth.signInAnonymously();
   } catch (_) {}
 }
-async function pushGameToCloud(gameRecord, rules) {
+async function pushGameToCloud(gameRecord, rules, winnerIndex) {
   try {
     const { data } = await supabase.auth.getUser();
     const user = data && data.user;
     if (!user || !gameRecord) return;
-    await supabase.from("games").upsert({
+    const wIdx = (winnerIndex === 0 || winnerIndex === 1) ? winnerIndex : null;
+    const { data: gRows } = await supabase.from("games").upsert({
       owner_id: user.id,
       client_id: gameRecord.id,
       played_at: new Date(gameRecord.id).toISOString(),
-      winner_team: gameRecord.winner,
+      winner_team: gameRecord.winner,          // legacy text (team name) — unchanged
+      winning_team: wIdx,                      // v2 relational index (0/1)
+      status: "completed",
+      ended_at: new Date().toISOString(),
       total_rounds: gameRecord.totalRounds,
       teams: gameRecord.teams,
       rounds: gameRecord.rounds,
       rules: rules || null,
-    }, { onConflict: "owner_id,client_id" });
+    }, { onConflict: "owner_id,client_id" }).select("id").single();
+    const gameId = gRows && gRows.id;
+    if (gameId && wIdx !== null) {
+      await pushRelationalGame(gameId, user.id, gameRecord, rules);
+    }
+  } catch (_) {}
+}
+
+// ─── Relational dual-write (Schema v2) ─────────────────────────────
+// Best-effort, additive backup ALONGSIDE the jsonb push above. Populates
+// players → game_participants → rounds → round_players so the event-grain
+// stats views have real data. Nothing reads these yet, so every failure is
+// swallowed exactly like the jsonb path; localStorage stays source of truth.
+// Idempotent: players on (owner_id,name); participants on (game_id,seat);
+// rounds on (game_id,round_number); round_players on (round_id,seat).
+async function pushRelationalGame(gameId, ownerId, gameRecord, rules) {
+  try {
+    const teams = gameRecord.teams;
+    if (!teams || teams.length !== 2) return;
+    // Seat geometry: team0 p0->0, team1 p0->1, team0 p1->2, team1 p1->3  (team = seat%2)
+    const seatDefs = [
+      { name: teams[0].p[0], team: 0, seat: 0 },
+      { name: teams[1].p[0], team: 1, seat: 1 },
+      { name: teams[0].p[1], team: 0, seat: 2 },
+      { name: teams[1].p[1], team: 1, seat: 3 },
+    ];
+    if (seatDefs.some(function(s){ return !s.name; })) return;
+    const uniqNames = Array.from(new Set(seatDefs.map(function(s){ return s.name; })));
+    if (uniqNames.length !== 4) return; // duplicate names would collapse seats/participants
+
+    // 1) players — upsert by name, map name -> id
+    const { data: pRows } = await supabase.from("players")
+      .upsert(uniqNames.map(function(n){ return { owner_id: ownerId, name: n }; }),
+              { onConflict: "owner_id,name" })
+      .select("id,name");
+    if (!pRows) return;
+    const idByName = {};
+    pRows.forEach(function(r){ idByName[r.name] = r.id; });
+    if (seatDefs.some(function(s){ return !idByName[s.name]; })) return;
+    const seatToPlayerId = {};
+    seatDefs.forEach(function(s){ seatToPlayerId[s.seat] = idByName[s.name]; });
+
+    // 2) game_participants (4 rows)
+    await supabase.from("game_participants").upsert(
+      seatDefs.map(function(s){ return { game_id: gameId, player_id: idByName[s.name], team: s.team, seat: s.seat }; }),
+      { onConflict: "game_id,seat" });
+
+    // 3) rounds — event rows derived from the jsonb round log
+    const rounds = gameRecord.rounds || [];
+    const bagLimit = (rules && rules.bagLimit) ? rules.bagLimit : 10;
+    const runningBags = [0, 0];
+    const roundRows = [];
+    for (var i = 0; i < rounds.length; i++) {
+      const rd = rounds[i];
+      const e = rd.entry, res = rd.results;
+      if (!e || !res || e.length !== 2) { roundRows.push(null); continue; }
+      const bid = [0, 0], tricks = [0, 0], pen = [0, 0];
+      for (var ti = 0; ti < 2; ti++) {
+        const en = e[ti];
+        const p1b = en.p1nil > 0 ? 0 : (parseInt(en.p1bid) || 0);
+        const p2b = en.p2nil > 0 ? 0 : (parseInt(en.p2bid) || 0);
+        bid[ti] = p1b + p2b;
+        tricks[ti] = (parseInt(en.p1tricks) || 0) + (parseInt(en.p2tricks) || 0);
+        pen[ti] = (rd.penalties && rd.penalties[ti]) ? rd.penalties[ti] : 0;
+        var carry = runningBags[ti] + ((res[ti] && res[ti].bags) ? res[ti].bags : 0);
+        while (carry >= bagLimit) carry -= bagLimit;
+        runningBags[ti] = carry;
+      }
+      var dealerSeat = null;
+      if (rd.dealer) {
+        var ds = seatDefs.find(function(s){ return s.name === rd.dealer; });
+        dealerSeat = ds ? ds.seat : null;
+      }
+      roundRows.push({
+        game_id: gameId,
+        round_number: rd.num || (i + 1),
+        dealer_seat: dealerSeat,
+        team_0_bid: bid[0], team_1_bid: bid[1],
+        team_0_tricks: tricks[0], team_1_tricks: tricks[1],
+        team_0_score_delta: ((res[0] && res[0].pts) || 0) + pen[0],
+        team_1_score_delta: ((res[1] && res[1].pts) || 0) + pen[1],
+        team_0_bags_after: runningBags[0], team_1_bags_after: runningBags[1],
+        team_0_bag_penalty_applied: pen[0], team_1_bag_penalty_applied: pen[1],
+      });
+    }
+    // DB enforces team_0_tricks + team_1_tricks = 13; skip malformed rounds so
+    // one bad hand never sinks the whole relational write (jsonb still has it).
+    const validRoundRows = roundRows.filter(function(r){ return r && (r.team_0_tricks + r.team_1_tricks === 13); });
+    if (validRoundRows.length === 0) return;
+    const { data: rRows } = await supabase.from("rounds")
+      .upsert(validRoundRows, { onConflict: "game_id,round_number" })
+      .select("id,round_number");
+    if (!rRows) return;
+    const roundIdByNum = {};
+    rRows.forEach(function(r){ roundIdByNum[r.round_number] = r.id; });
+
+    // 4) round_players — 4 rows per successfully-written round
+    const rpRows = [];
+    for (var j = 0; j < rounds.length; j++) {
+      const rd2 = rounds[j];
+      const rnum = rd2.num || (j + 1);
+      const roundId = roundIdByNum[rnum];
+      if (!roundId || !rd2.entry) continue;
+      for (var t2 = 0; t2 < 2; t2++) {
+        const en2 = rd2.entry[t2];
+        if (!en2) continue;
+        const specs = [
+          { seat: t2 === 0 ? 0 : 1, bidRaw: en2.p1bid, tricksRaw: en2.p1tricks, nil: en2.p1nil },
+          { seat: t2 === 0 ? 2 : 3, bidRaw: en2.p2bid, tricksRaw: en2.p2tricks, nil: en2.p2nil },
+        ];
+        specs.forEach(function(sp){
+          const nilType = sp.nil === 2 ? "blind_nil" : (sp.nil === 1 ? "nil" : null);
+          const tricksTaken = parseInt(sp.tricksRaw) || 0;
+          rpRows.push({
+            round_id: roundId,
+            player_id: seatToPlayerId[sp.seat],
+            seat: sp.seat,
+            bid: nilType ? 0 : (parseInt(sp.bidRaw) || 0),
+            tricks_taken: tricksTaken,
+            nil_type: nilType,
+            nil_succeeded: nilType ? (tricksTaken === 0) : null,
+          });
+        });
+      }
+    }
+    if (rpRows.length > 0) {
+      await supabase.from("round_players").upsert(rpRows, { onConflict: "round_id,seat" });
+    }
   } catch (_) {}
 }
 
@@ -1718,6 +1849,7 @@ export default function App() {
         after: newTeams.map(function(t) { return t.score; }),
         penalties: newTeams.map(function(t, i) { var b = s.teams[i].bags + results[i].bags; var p = 0; while (b >= rules.bagLimit) { b -= rules.bagLimit; p += rules.bagPenalty; } return p; }),
         snap: s.teams.map(function(t) { return { name: t.name, p: [t.p[0], t.p[1]] }; }),
+        dealer: (s.seating && s.seating.dealer && s.seating[s.seating.dealer]) ? s.seating[s.seating.dealer] : null,
       };
 
       const s0 = newTeams[0].score, s1 = newTeams[1].score;
@@ -1736,7 +1868,7 @@ export default function App() {
           winner
         );
         saveGameToHistory(gameRecord);
-        pushGameToCloud(gameRecord, rules);
+        pushGameToCloud(gameRecord, rules, winner);
         // Trigger summary card
         setTimeout(function() { setShowSummary(true); }, 800);
       }
