@@ -38,6 +38,11 @@ function saveGameToHistory(gameData) {
     // (e.g. impure state-updater firing twice under React StrictMode). Match on
     // final scores + round count + an id within a 5s window. A genuinely replayed
     // identical game minutes later will have an id far outside the window.
+    // Deterministic dedupe: games carry a stable id (assigned at game start), so a
+    // re-save (double-tap Confirm, StrictMode double-fire) REPLACES rather than adds.
+    const existingIdx = history.findIndex(function(g) { return g && g.id === gameData.id; });
+    if (existingIdx >= 0) history.splice(existingIdx, 1);
+    // Heuristic fallback for legacy records that predate stable ids.
     const last = history[0];
     if (last && last.teams && gameData.teams &&
         last.teams.length === gameData.teams.length &&
@@ -63,7 +68,7 @@ function genShareCode() {
 function buildGameRecord(gs, winner) {
   const now = new Date();
   return {
-    id: now.getTime(),
+    id: (gs && gs.gameId) || now.getTime(),
     date: now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     time: now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
     teams: gs.teams.map(function(t) { return { name: t.name, score: t.score, bags: t.bags, p: [t.p[0], t.p[1]] }; }),
@@ -2136,6 +2141,9 @@ export default function App() {
       return Object.assign({}, s, {
         seating: setupSeating,
         activeBidSeat: getBidOrder(setupSeating.dealer)[0],
+        gameId: Date.now(),   // stable id for this game -> dedupes re-saves (local + cloud)
+        archived: false,
+        shareCode: null,
       });
     });
     setShowSetup(false);
