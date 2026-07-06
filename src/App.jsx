@@ -2128,12 +2128,11 @@ function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
   const [waiting, setWaiting] = React.useState(true);
   React.useEffect(function() {
-    var base = "https://rstmlalwjhyeflbmlhfd.supabase.co/functions/v1/tv";
     var alive = true;
     async function tick() {
       try {
-        var r = await fetch(base + "?c=" + encodeURIComponent(code) + "&format=json", { cache: "no-store" });
-        var j = await r.json();
+        var res = await supabase.functions.invoke("tv", { body: { c: code } });
+        var j = res && res.data;
         if (!alive) return;
         if (j && !j.error) { setD(j); setWaiting(false); } else { setWaiting(true); }
       } catch (_) {}
