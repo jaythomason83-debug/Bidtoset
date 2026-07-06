@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BidToSet — Live</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:#0a0e1b;color:#e6edf5;font-family:Georgia,serif;overflow:hidden;
+    background-image:radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)}
+  .wrap{height:100%;display:flex;flex-direction:column;padding:3vh 3vw}
+  .top{display:flex;align-items:center;justify-content:center;gap:2vw;color:#c8a84e;font-variant:small-caps;letter-spacing:0.3vw;font-size:3.2vh}
+  .live{color:#6dbf8e;font-size:2vh;letter-spacing:0.2vw;font-family:Arial,sans-serif}
+  .dot{display:inline-block;width:1.4vh;height:1.4vh;border-radius:50%;background:#6dbf8e;margin-right:0.6vw;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.25}}
+  .board{flex:1;display:flex;align-items:center;justify-content:center;gap:3vw}
+  .team{flex:1;max-width:42vw;background:rgba(255,255,255,0.03);border:0.3vh solid rgba(200,168,78,0.25);border-radius:2vh;padding:4vh 3vw;text-align:center;transition:all .4s}
+  .team.win{border-color:#c8a84e;background:linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05));box-shadow:0 0 8vh rgba(200,168,78,0.3)}
+  .tn{font-size:4vh;color:#c8a84e;font-weight:bold;margin-bottom:1vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc{font-size:16vh;font-weight:bold;line-height:1;color:#e6edf5}
+  .win .sc{color:#c8a84e}
+  .bg{font-size:2.6vh;color:#8aaabb;margin-top:1.5vh;font-family:Arial,sans-serif}
+  .vs{font-size:4vh;color:#4a5a6a;font-variant:small-caps}
+  .banner{text-align:center;font-size:4vh;color:#c8a84e;height:6vh;font-variant:small-caps;letter-spacing:0.3vw}
+  .foot{text-align:center;color:#4a5a6a;font-size:1.8vh;font-family:Arial,sans-serif}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">&spades; BidToSet <span id="round" style="color:#8aaabb">&mdash;</span> <span class="live" id="live"><span class="dot"></span>LIVE</span></div>
+  <div class="board">
+    <div class="team" id="t0"><div class="tn" id="n0">&mdash;</div><div class="sc" id="s0">0</div><div class="bg" id="b0"></div></div>
+    <div class="vs">vs</div>
+    <div class="team" id="t1"><div class="tn" id="n1">&mdash;</div><div class="sc" id="s1">0</div><div class="bg" id="b1"></div></div>
+  </div>
+  <div class="banner" id="banner"></div>
+  <div class="foot">bidtoset.app &middot; live scoreboard</div>
+</div>
+<script>
+  var BASE = "https://rstmlalwjhyeflbmlhfd.supabase.co/functions/v1/tv";
+  var CODE = new URLSearchParams(location.search).get("c") || "";
+  function setTeam(i, t, win){
+    document.getElementById('n'+i).textContent = t.name;
+    document.getElementById('s'+i).textContent = t.score;
+    document.getElementById('b'+i).textContent = t.bags ? (t.bags + ' bag' + (t.bags===1?'':'s')) : '';
+    document.getElementById('t'+i).classList.toggle('win', !!win);
+  }
+  async function tick(){
+    if(!CODE){ document.getElementById('round').textContent='no game code'; return; }
+    try{
+      var r = await fetch(BASE + '?c=' + encodeURIComponent(CODE) + '&format=json', {cache:'no-store'});
+      var d = await r.json();
+      if(d.error){ document.getElementById('round').textContent='waiting for game…'; return; }
+      var done = d.status === 'completed';
+      document.getElementById('round').textContent = done ? '· Final' : ('· Round ' + (d.round||0));
+      document.getElementById('live').style.display = done ? 'none' : '';
+      setTeam(0, d.teams[0], d.winningTeam===0);
+      setTeam(1, d.teams[1], d.winningTeam===1);
+      var w = d.winningTeam;
+      document.getElementById('banner').textContent = (w===0||w===1) ? ('♠ ' + d.teams[w].name + ' wins') : '';
+    }catch(e){}
+  }
+  setInterval(tick, 2000); tick();
+</script>
+</body>
+</html>
