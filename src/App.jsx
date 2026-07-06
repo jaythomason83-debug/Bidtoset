@@ -1120,7 +1120,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 300, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 20px 80px 20px", backdropFilter: "blur(8px)", animation: "fadeIn 0.4s ease-out" }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9500, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "40px 20px 120px 20px", backdropFilter: "blur(8px)", animation: "fadeIn 0.4s ease-out" }}
       onClick={onDismiss}>
       <div onClick={function(e) { e.stopPropagation(); }}
         style={{ background: "linear-gradient(145deg, #0d1528, #090d1b)", border: "1px solid " + GOLD, borderRadius: "18px", padding: "24px", width: "100%", maxWidth: "400px", boxShadow: "0 0 60px rgba(200,168,78,0.3)" }}>
