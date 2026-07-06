@@ -1125,6 +1125,8 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
     return cv;
   }
 
+  const [recapPreview, setRecapPreview] = React.useState(null);
+
   function shareRecapImage() {
     try {
       const cv = drawRecapCanvas();
@@ -1135,11 +1137,8 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
         if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
           navigator.share({ files: [file], title: "BidToSet Game Recap", text: caption }).catch(function() {});
         } else {
-          const u = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = u; a.download = "bidtoset-recap.png";
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(function() { URL.revokeObjectURL(u); }, 1000);
+          // Desktop / no file-share: SHOW the graphic so it's visible + saveable.
+          setRecapPreview(cv.toDataURL("image/png"));
         }
       }, "image/png");
     } catch (_) {}
@@ -1273,6 +1272,17 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
           <button onClick={onDismiss} style={{ background: "transparent", border: "none", color: "#7a8a9a", fontSize: "11px", fontFamily: "Georgia, serif", letterSpacing: "1px", cursor: "pointer", textDecoration: "underline" }}>Done</button>
         </div>
         {showQR && <div style={{ textAlign: "center", marginTop: "12px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.app</div></div>}
+        {recapPreview && (
+          <div onClick={function() { setRecapPreview(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 600, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
+            <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", marginBottom: "10px", textTransform: "uppercase" }}>Your shareable recap</div>
+            <img src={recapPreview} alt="Game recap" onClick={function(e) { e.stopPropagation(); }} style={{ maxWidth: "min(360px, 88vw)", width: "100%", borderRadius: "12px", border: "1px solid rgba(200,168,78,0.4)" }} />
+            <div onClick={function(e) { e.stopPropagation(); }} style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
+              <a href={recapPreview} download="bidtoset-recap.png" style={{ background: GOLD, color: "#0a0e1b", textDecoration: "none", fontWeight: "bold", fontSize: "13px", letterSpacing: "1px", padding: "12px 22px", borderRadius: "10px" }}>Save image</a>
+              <button onClick={function() { setRecapPreview(null); }} style={{ background: "transparent", color: "#c0d0e0", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "10px", padding: "12px 22px", fontSize: "13px", cursor: "pointer" }}>Close</button>
+            </div>
+            <div style={{ fontSize: "10px", color: "#6a7a8a", marginTop: "12px", textAlign: "center", maxWidth: "320px" }}>Right-click (or long-press) the image to copy or post it to Instagram, Facebook, or Messages.</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2021,12 +2031,125 @@ function ClaimFlow({ code, seat, name, onClose }) {
   );
 }
 
+// ─── Live cloud writes (TV / Chromecast foundation) ────────
+// Push state to the cloud AS IT HAPPENS (game start + each round) so a live TV
+// view has something mid-game. Best-effort, swallowed, local-first. The
+// end-of-game push (pushGameToCloud/pushRelationalGame) stays as the backstop.
+var __btsParticipants = {};
+function genCloudId() {
+  try { return crypto.randomUUID(); }
+  catch (_) { return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){ var r = Math.random()*16|0; return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16); }); }
+}
+async function cloudStartGame(cloudGameId, clientId, shareCode, teams) {
+  try {
+    if (!cloudGameId || !teams || teams.length !== 2) return;
+    const { data: u } = await supabase.auth.getUser();
+    const user = u && u.user; if (!user) return;
+    await supabase.from("games").upsert({
+      id: cloudGameId, owner_id: user.id, client_id: clientId,
+      status: "in_progress", started_at: new Date().toISOString(), played_at: new Date(clientId).toISOString(),
+      share_code: shareCode, winner_team: null, total_rounds: 0,
+      teams: teams.map(function(t){ return { name: t.name, score: 0, bags: 0, p: [t.p[0], t.p[1]] }; }),
+      rounds: [],
+    }, { onConflict: "owner_id,client_id" });
+    const seatDefs = [
+      { name: teams[0].p[0], team: 0, seat: 0 }, { name: teams[1].p[0], team: 1, seat: 1 },
+      { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
+    ];
+    if (seatDefs.some(function(x){ return !x.name; })) return;
+    const uniq = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
+    if (uniq.length !== 4) return;
+    const { data: pRows } = await supabase.from("players")
+      .upsert(uniq.map(function(n){ return { owner_id: user.id, name: n }; }), { onConflict: "owner_id,name" })
+      .select("id,name");
+    if (!pRows) return;
+    const idByName = {}; pRows.forEach(function(r){ idByName[r.name] = r.id; });
+    const seatToPid = {}; seatDefs.forEach(function(x){ seatToPid[x.seat] = idByName[x.name]; });
+    __btsParticipants[cloudGameId] = seatToPid;
+    await supabase.from("game_participants").upsert(
+      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
+      { onConflict: "game_id,seat" });
+  } catch (_) {}
+}
+async function cloudEnsureParticipants(cloudGameId) {
+  if (__btsParticipants[cloudGameId]) return __btsParticipants[cloudGameId];
+  try {
+    const { data: parts } = await supabase.from("game_participants").select("seat, player_id").eq("game_id", cloudGameId);
+    if (!parts || !parts.length) return null;
+    const m = {}; parts.forEach(function(p){ m[p.seat] = p.player_id; });
+    __btsParticipants[cloudGameId] = m; return m;
+  } catch (_) { return null; }
+}
+async function cloudPushRound(cloudGameId, teams, round, newTeams) {
+  try {
+    if (!cloudGameId || !round || !round.entry || round.entry.length !== 2) return;
+    const seatToPid = await cloudEnsureParticipants(cloudGameId);
+    if (!seatToPid) return;
+    const e0 = round.entry[0], e1 = round.entry[1], res = round.results || [], pen = round.penalties || [0, 0];
+    function tBid(e){ return (e.p1nil > 0 ? 0 : (parseInt(e.p1bid) || 0)) + (e.p2nil > 0 ? 0 : (parseInt(e.p2bid) || 0)); }
+    function tTricks(e){ return (parseInt(e.p1tricks) || 0) + (parseInt(e.p2tricks) || 0); }
+    var dealerSeat = null;
+    if (round.dealer) { var ds = [ {n:teams[0].p[0],s:0},{n:teams[1].p[0],s:1},{n:teams[0].p[1],s:2},{n:teams[1].p[1],s:3} ].find(function(x){ return x.n === round.dealer; }); dealerSeat = ds ? ds.s : null; }
+    const t0 = tTricks(e0), t1 = tTricks(e1);
+    if (t0 + t1 !== 13) return;
+    const roundRow = {
+      game_id: cloudGameId, round_number: round.num, dealer_seat: dealerSeat,
+      team_0_bid: tBid(e0), team_1_bid: tBid(e1), team_0_tricks: t0, team_1_tricks: t1,
+      team_0_score_delta: ((res[0] && res[0].pts) || 0) + (pen[0] || 0),
+      team_1_score_delta: ((res[1] && res[1].pts) || 0) + (pen[1] || 0),
+      team_0_bags_after: (newTeams && newTeams[0] ? newTeams[0].bags : 0),
+      team_1_bags_after: (newTeams && newTeams[1] ? newTeams[1].bags : 0),
+      team_0_bag_penalty_applied: pen[0] || 0, team_1_bag_penalty_applied: pen[1] || 0,
+    };
+    const { data: rRow } = await supabase.from("rounds").upsert([roundRow], { onConflict: "game_id,round_number" }).select("id").single();
+    if (!rRow || !rRow.id) return;
+    const roundId = rRow.id, rpRows = [];
+    [0, 1].forEach(function(ti){
+      const en = round.entry[ti]; if (!en) return;
+      [["p1", ti === 0 ? 0 : 1], ["p2", ti === 0 ? 2 : 3]].forEach(function(pair){
+        const pk = pair[0], seat = pair[1], nil = en[pk + "nil"], tricks = parseInt(en[pk + "tricks"]) || 0;
+        const nilType = nil === 2 ? "blind_nil" : (nil === 1 ? "nil" : null);
+        rpRows.push({ round_id: roundId, player_id: seatToPid[seat], seat: seat, bid: nilType ? 0 : (parseInt(en[pk + "bid"]) || 0), tricks_taken: tricks, nil_type: nilType, nil_succeeded: nilType ? (tricks === 0) : null });
+      });
+    });
+    await supabase.from("round_players").upsert(rpRows, { onConflict: "round_id,seat" });
+    await supabase.from("games").update({ total_rounds: round.num }).eq("id", cloudGameId);
+  } catch (_) {}
+}
+async function cloudDeleteRound(cloudGameId, roundNumber) {
+  try { if (cloudGameId && roundNumber) await supabase.from("rounds").delete().eq("game_id", cloudGameId).eq("round_number", roundNumber); } catch (_) {}
+}
+
 export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
+  const lastPushedRound = useRef(0);
+  const startedCloudGame = useRef(null);
   const [scoreShake, setScoreShake] = useState(false);
   const [claim, setClaim] = useState(parseClaimParams);
   useEffect(function() { if (!claim) ensureAnonSession(); }, []);
+  // Live cloud write: create the game in the cloud the moment a new one starts.
+  useEffect(function() {
+    if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
+      startedCloudGame.current = gs.cloudGameId;
+      lastPushedRound.current = gs.rounds ? gs.rounds.length : 0;
+      cloudStartGame(gs.cloudGameId, gs.gameId, gs.shareCode, gs.teams);
+    }
+  }, [gs.cloudGameId]);
+  // Live cloud write: push each round as scored; delete the cloud round on undo.
+  useEffect(function() {
+    if (!gs.cloudGameId) return;
+    var n = gs.rounds ? gs.rounds.length : 0;
+    if (n > lastPushedRound.current) {
+      var lr = gs.rounds[n - 1];
+      lastPushedRound.current = n;
+      cloudPushRound(gs.cloudGameId, gs.teams, lr, gs.teams);
+    } else if (n < lastPushedRound.current) {
+      var removed = lastPushedRound.current;
+      lastPushedRound.current = n;
+      cloudDeleteRound(gs.cloudGameId, removed);
+    }
+  }, [gs.rounds ? gs.rounds.length : 0]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
@@ -2314,13 +2437,15 @@ export default function App() {
 
   // ── Setup modal: commit seating to game state and start game ─────────────
   function commitSetup() {
+    var gid = Date.now(), cloudId = genCloudId(), share = genShareCode();
     upd(function(s) {
       return Object.assign({}, s, {
         seating: setupSeating,
         activeBidSeat: getBidOrder(setupSeating.dealer)[0],
-        gameId: Date.now(),   // stable id for this game -> dedupes re-saves (local + cloud)
+        gameId: gid,           // stable id -> dedupes re-saves (local + cloud)
+        cloudGameId: cloudId,  // client-owned UUID -> live cloud writes reference it
+        shareCode: share,      // mint at start so the game is shareable/castable live
         archived: false,
-        shareCode: null,
       });
     });
     setShowSetup(false);
