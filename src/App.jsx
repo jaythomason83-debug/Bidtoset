@@ -1845,11 +1845,141 @@ function OnboardingOverlay({ onDismiss }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
+// ─── Claim Profile flow (Phase B viral loop) ────────────────────
+function parseClaimParams() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const code = q.get("claim");
+    if (!code) return null;
+    return { code: code, seat: q.get("seat"), name: q.get("name") ? decodeURIComponent(q.get("name")) : "" };
+  } catch (_) { return null; }
+}
+
+function ClaimFlow({ code, seat, name, onClose }) {
+  const [stage, setStage] = useState("checking");
+  const [email, setEmail] = useState("");
+  const [teaser, setTeaser] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(function() {
+    let handled = false;
+    function usable(sess) { return sess && sess.user && !sess.user.is_anonymous; }
+    async function doClaim() {
+      setStage("claiming");
+      try {
+        const res = await supabase.functions.invoke("game-claim", { body: { code: code, seat: Number(seat) } });
+        const data = res && res.data;
+        if ((res && res.error) || !data || data.error) { setErrMsg((data && data.error) || "claim_failed"); setStage("error"); return; }
+        setTeaser(data); setStage("done");
+      } catch (_) { setErrMsg("network"); setStage("error"); }
+    }
+    async function check() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (usable(data.session)) { handled = true; doClaim(); return; }
+      } catch (_) {}
+      if (window.location.hash && window.location.hash.indexOf("access_token") >= 0) {
+        setStage("checking");
+        setTimeout(function() { setStage(function(st) { return st === "checking" ? "input" : st; }); }, 6000);
+        return;
+      }
+      setStage("input");
+    }
+    check();
+    const sub = supabase.auth.onAuthStateChange(function(_evt, session) {
+      if (!handled && usable(session)) { handled = true; doClaim(); }
+    });
+    return function() { try { sub.data.subscription.unsubscribe(); } catch (_) {} };
+  }, []);
+
+  async function sendLink() {
+    if (!email || email.indexOf("@") < 1) { setErrMsg("Enter a valid email."); return; }
+    setErrMsg(""); setStage("sending");
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: window.location.href } });
+      if (error) { setErrMsg(error.message || "Couldn't send the link."); setStage("input"); }
+      else setStage("sent");
+    } catch (_) { setErrMsg("Couldn't send the link."); setStage("input"); }
+  }
+
+  function shell(children) {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
+        <div style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "26px", width: "100%", maxWidth: "360px", textAlign: "center", boxShadow: "0 0 40px rgba(0,0,0,0.6)" }}>
+          <div style={{ fontSize: "30px", color: GOLD }}>♠</div>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === "checking" || stage === "claiming") {
+    return shell(<div style={{ color: "#8aaabb", fontSize: "14px", marginTop: "14px" }}>{stage === "claiming" ? "Claiming your profile…" : "One sec…"}</div>);
+  }
+  if (stage === "sent") {
+    return shell(
+      <div>
+        <div style={{ fontSize: "17px", color: GOLD, fontWeight: "bold", margin: "10px 0" }}>Check your email</div>
+        <div style={{ fontSize: "13px", color: "#c8d8e8", lineHeight: "1.5" }}>We sent a one-tap sign-in link to <b>{email}</b>. Open it <b>on this device</b> to finish claiming {name || "your profile"}.</div>
+        <button onClick={onClose} style={{ marginTop: "18px", background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Close</button>
+      </div>
+    );
+  }
+  if (stage === "done") {
+    if (teaser && teaser.alreadyOther) {
+      return shell(
+        <div>
+          <div style={{ fontSize: "17px", color: "#e05c5c", fontWeight: "bold", margin: "10px 0" }}>Already claimed</div>
+          <div style={{ fontSize: "13px", color: "#c8d8e8" }}>{name || "This profile"} has already been claimed by someone else.</div>
+          <button onClick={onClose} style={{ marginTop: "18px", background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "12px 22px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>Continue</button>
+        </div>
+      );
+    }
+    return shell(
+      <div>
+        <div style={{ fontSize: "12px", color: "#4a8a6a", letterSpacing: "2px", marginTop: "8px" }}>PROFILE CLAIMED</div>
+        <div style={{ fontSize: "22px", color: GOLD, fontWeight: "bold", margin: "4px 0 14px" }}>{(teaser && teaser.name) || name}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: "18px", marginBottom: "6px" }}>
+          <div><div style={{ fontSize: "24px", color: GREEN, fontWeight: "bold" }}>{teaser ? teaser.gamesPlayed : 0}</div><div style={{ fontSize: "10px", color: "#8aaabb" }}>GAMES</div></div>
+          <div><div style={{ fontSize: "24px", color: GREEN, fontWeight: "bold" }}>{teaser ? teaser.gamesWon : 0}</div><div style={{ fontSize: "10px", color: "#8aaabb" }}>WINS</div></div>
+          <div><div style={{ fontSize: "24px", color: GOLD, fontWeight: "bold" }}>{teaser ? teaser.winRate : 0}%</div><div style={{ fontSize: "10px", color: "#8aaabb" }}>WIN RATE</div></div>
+        </div>
+        <div style={{ fontSize: "11px", color: "#6a7a8a", margin: "10px 0 4px" }}>Your games are now tied to this profile.</div>
+        <button onClick={onClose} style={{ marginTop: "14px", background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "12px 26px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>Continue</button>
+      </div>
+    );
+  }
+  if (stage === "error") {
+    return shell(
+      <div>
+        <div style={{ fontSize: "16px", color: "#e05c5c", fontWeight: "bold", margin: "10px 0" }}>Something went wrong</div>
+        <div style={{ fontSize: "12px", color: "#c8d8e8" }}>{errMsg || "Please try again."}</div>
+        <div style={{ marginTop: "16px" }}>
+          <button onClick={function() { setErrMsg(""); setStage("input"); }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "10px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "8px" }}>Try again</button>
+          <button onClick={onClose} style={{ background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Close</button>
+        </div>
+      </div>
+    );
+  }
+  return shell(
+    <div>
+      <div style={{ fontSize: "17px", color: GOLD, fontWeight: "bold", margin: "10px 0 2px" }}>Claim {name || "your profile"}</div>
+      <div style={{ fontSize: "12px", color: "#8aaabb", marginBottom: "16px", lineHeight: "1.5" }}>Enter your email and we'll send a one-tap sign-in link. No password — your games stay tied to you.</div>
+      <input type="email" inputMode="email" autoCapitalize="none" value={email} onChange={function(e) { setEmail(e.target.value); }} placeholder="you@email.com"
+        style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "10px", padding: "13px", fontSize: "15px", color: "#e6edf5", textAlign: "center", marginBottom: "10px" }} />
+      {errMsg && <div style={{ fontSize: "11px", color: "#e05c5c", marginBottom: "8px" }}>{errMsg}</div>}
+      <button onClick={sendLink} disabled={stage === "sending"} style={{ width: "100%", background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "14px", fontSize: "14px", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer" }}>{stage === "sending" ? "Sending…" : "Send sign-in link"}</button>
+      <button onClick={onClose} style={{ marginTop: "12px", background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Not now</button>
+    </div>
+  );
+}
+
 export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
   const [scoreShake, setScoreShake] = useState(false);
-  useEffect(function() { ensureAnonSession(); }, []);
+  const [claim, setClaim] = useState(parseClaimParams);
+  useEffect(function() { if (!claim) ensureAnonSession(); }, []);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
@@ -2625,6 +2755,8 @@ export default function App() {
       )}
 
       {/* Confirm Final Score gate — one-round correction window on the deciding round */}
+      {claim && <ClaimFlow code={claim.code} seat={claim.seat} name={claim.name} onClose={function() { setClaim(null); try { window.history.replaceState({}, "", window.location.pathname); } catch (_) {} }} />}
+
       {gs.winner !== null && !gs.archived && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 350, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
           <div style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "24px", width: "100%", maxWidth: "360px", boxShadow: "0 0 40px rgba(0,0,0,0.6)" }}>
