@@ -424,7 +424,20 @@ function buildGameSummary(gs, rules) {
   // Most bags this game (for game-level callout)
   const mostBagsPlayer = allPlayers.reduce(function(worst, p) { return p.bags > worst.bags ? p : worst; }, allPlayers[0]);
 
-  return { allPlayers, mvp, sandbaggers, mostBagsPlayer };
+  // Contribution: each player's share of their TEAM's tricks this game.
+  const teamTricks = {};
+  allPlayers.forEach(function(p) { teamTricks[p.teamName] = (teamTricks[p.teamName] || 0) + p.totalTricks; });
+  allPlayers.forEach(function(p) {
+    var tt = teamTricks[p.teamName] || 0;
+    p.contribution = tt > 0 ? Math.round((p.totalTricks / tt) * 100) : 50;
+  });
+  const byContribution = allPlayers.slice().sort(function(a, b) { return b.contribution - a.contribution; });
+  const topC = byContribution[0];
+  const botC = byContribution[byContribution.length - 1];
+  const heavyLifter = (topC && topC.contribution >= 60) ? topC : null;
+  const deadWeight = (botC && botC.contribution <= 40) ? botC : null;
+
+  return { allPlayers, mvp, sandbaggers, mostBagsPlayer, heavyLifter, deadWeight };
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1020,6 +1033,8 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
       "",
       "🏆 MVP: " + summary.mvp.name + " (" + summary.mvp.bidAccuracy + "% bid accuracy)",
       summary.mostBagsPlayer.bags > 0 ? ("🎒 Most Bags: " + summary.mostBagsPlayer.name + " (" + summary.mostBagsPlayer.bags + " bags)") : "",
+      summary.heavyLifter ? ("💪 Heavy Lifter: " + summary.heavyLifter.name + " (" + summary.heavyLifter.contribution + "% of team tricks)") : "",
+      summary.deadWeight ? ("⚓ Dead Weight: " + summary.deadWeight.name + " (" + summary.deadWeight.contribution + "% of team tricks)") : "",
       summary.sandbaggers.length > 0 ? ("⚠️ Sandbagger Alert: " + summary.sandbaggers.map(function(p) { return p.name; }).join(", ")) : "",
       "",
       gs.shareCode ? ("Full recap: " + gameViewUrl(gs.shareCode)) : "",
@@ -1038,6 +1053,64 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
     try {
       if (navigator.share) { navigator.share({ title: "BidToSet Game Recap", text: text, url: link }).catch(function() {}); }
       else { navigator.clipboard.writeText(link); }
+    } catch (_) {}
+  }
+
+  function drawRecapCanvas() {
+    const W = 1080, H = 1350, cx = W / 2;
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#0a0e1b"; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(200,168,78,0.55)"; g.lineWidth = 6; g.strokeRect(26, 26, W - 52, H - 52);
+    function center(str, y, size, color, weight, font) {
+      g.textAlign = "center"; g.fillStyle = color;
+      g.font = ((weight ? weight + " " : "") + size + "px " + (font || "Georgia, serif"));
+      g.fillText(str, cx, y);
+    }
+    center("♠", 150, 84, "#c8a84e", "");
+    center("BIDTOSET", 225, 46, "#c8a84e", "bold");
+    center("GAME RECAP", 268, 26, "#6a7a8a", "", "Arial, sans-serif");
+    if (winner) {
+      center("WINNER", 390, 30, "#a08040", "bold", "Arial, sans-serif");
+      center(winner.name, 460, 60, "#c8a84e", "bold");
+      center(String(winner.score), 575, 118, "#c8a84e", "bold");
+      center("vs " + loser.name + " — " + loser.score, 640, 32, "#8a9aaa", "", "Arial, sans-serif");
+      center(gs.rounds.length + " rounds", 685, 26, "#5a6a7a", "", "Arial, sans-serif");
+    }
+    let y = 800;
+    function row(label, name, detail, color) {
+      g.textAlign = "left";
+      g.fillStyle = color; g.font = "bold 28px Arial, sans-serif"; g.fillText(label, 130, y);
+      g.fillStyle = "#e6edf5"; g.font = "bold 44px Georgia, serif"; g.fillText(name, 130, y + 52);
+      g.fillStyle = "#8a9aaa"; g.font = "26px Arial, sans-serif"; g.fillText(detail, 130, y + 92);
+      y += 138;
+    }
+    if (summary.mvp) row("MVP", summary.mvp.name, summary.mvp.bidAccuracy + "% bid accuracy", "#6dbf8e");
+    if (summary.heavyLifter) row("HEAVY LIFTER", summary.heavyLifter.name, summary.heavyLifter.contribution + "% of team tricks", "#6dbf8e");
+    if (summary.deadWeight) row("DEAD WEIGHT", summary.deadWeight.name, summary.deadWeight.contribution + "% of team tricks", "#e05c5c");
+    if (summary.mostBagsPlayer && summary.mostBagsPlayer.bags > 0) row("MOST BAGS", summary.mostBagsPlayer.name, summary.mostBagsPlayer.bags + " bags", "#e8943a");
+    center("Score your own at bidtoset.app", H - 70, 32, "#c8a84e", "bold", "Arial, sans-serif");
+    return cv;
+  }
+
+  function shareRecapImage() {
+    try {
+      const cv = drawRecapCanvas();
+      cv.toBlob(function(blob) {
+        if (!blob) return;
+        const file = new File([blob], "bidtoset-recap.png", { type: "image/png" });
+        const caption = (winner ? (winner.name + " won " + winner.score + "-" + loser.score) : "Game over") + " \u2014 played on BidToSet";
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+          navigator.share({ files: [file], title: "BidToSet Game Recap", text: caption }).catch(function() {});
+        } else {
+          const u = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = u; a.download = "bidtoset-recap.png";
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(function() { URL.revokeObjectURL(u); }, 1000);
+        }
+      }, "image/png");
     } catch (_) {}
   }
 
@@ -1076,7 +1149,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
         <div style={{ background: "rgba(109,191,142,0.08)", border: "1px solid rgba(109,191,142,0.3)", borderRadius: "10px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={{ fontSize: "24px" }}>🏆</div>
           <div>
-            <div style={{ fontSize: "10px", color: "#4a8a6a", letterSpacing: "2px" }}>MVP — 65% BID ACCURACY · 35% CONTRIBUTION</div>
+            <div style={{ fontSize: "10px", color: "#4a8a6a", letterSpacing: "2px" }}>MOST VALUABLE PLAYER</div>
             <div style={{ fontSize: "16px", color: GREEN, fontWeight: "bold" }}>{summary.mvp.name}</div>
             <div style={{ fontSize: "11px", color: "#6a9a7a" }}>{summary.mvp.bidAccuracy}% bid accuracy · {summary.mvp.teamName}</div>
           </div>
@@ -1090,6 +1163,27 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
               <div style={{ fontSize: "10px", color: "#8a5a2a", letterSpacing: "2px" }}>MOST BAGS THIS GAME</div>
               <div style={{ fontSize: "16px", color: ORANGE, fontWeight: "bold" }}>{summary.mostBagsPlayer.name}</div>
               <div style={{ fontSize: "11px", color: "#7a5a3a" }}>{summary.mostBagsPlayer.bags} bag{summary.mostBagsPlayer.bags !== 1 ? "s" : ""} taken</div>
+            </div>
+          </div>
+        )}
+
+        {summary.heavyLifter && (
+          <div style={{ background: "rgba(109,191,142,0.08)", border: "1px solid rgba(109,191,142,0.3)", borderRadius: "10px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ fontSize: "24px" }}>💪</div>
+            <div>
+              <div style={{ fontSize: "10px", color: "#4a8a6a", letterSpacing: "2px" }}>HEAVY LIFTER</div>
+              <div style={{ fontSize: "16px", color: GREEN, fontWeight: "bold" }}>{summary.heavyLifter.name}</div>
+              <div style={{ fontSize: "11px", color: "#6a9a7a" }}>{summary.heavyLifter.contribution}% of team tricks · carried {summary.heavyLifter.teamName}</div>
+            </div>
+          </div>
+        )}
+        {summary.deadWeight && (
+          <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.25)", borderRadius: "10px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ fontSize: "24px" }}>⚓</div>
+            <div>
+              <div style={{ fontSize: "10px", color: "#8a2a2a", letterSpacing: "2px" }}>DEAD WEIGHT</div>
+              <div style={{ fontSize: "16px", color: RED, fontWeight: "bold" }}>{summary.deadWeight.name}</div>
+              <div style={{ fontSize: "11px", color: "#8a4a4a" }}>{summary.deadWeight.contribution}% of team tricks · got carried</div>
             </div>
           </div>
         )}
@@ -1108,26 +1202,25 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
           </div>
         )}
 
+        {/* Actions: two clear CTAs (post image / send link) + a quiet utility row */}
+        <button onClick={shareRecapImage}
+          style={{ width: "100%", background: "linear-gradient(135deg,#c8a84e,#e8c878)", color: DIM, border: "none", borderRadius: "12px", padding: "16px", fontSize: "14px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "10px", boxShadow: "0 0 22px rgba(200,168,78,0.28)" }}>
+          Share Recap
+        </button>
+
         {gs.shareCode && (
           <button onClick={shareGame}
-            style={{ width: "100%", background: "linear-gradient(135deg,#c8a84e,#e8c878)", color: DIM, border: "none", borderRadius: "10px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "10px" }}>
-            Share Game Recap
+            style={{ width: "100%", background: "transparent", color: GOLD, border: "1px solid rgba(200,168,78,0.5)", borderRadius: "12px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "14px" }}>
+            Send to Players
           </button>
         )}
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button onClick={copyToClipboard}
-            style={{ flex: 1, background: GOLD, color: DIM, border: "none", borderRadius: "10px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
-            Copy Summary
-          </button>
-          <button onClick={onDismiss}
-            style={{ flex: 1, background: "transparent", color: "#c0d0e0", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer" }}>
-            Dismiss
-          </button>
+        <div style={{ display: "flex", justifyContent: "center", gap: "20px", alignItems: "center" }}>
+          <button onClick={copyToClipboard} style={{ background: "transparent", border: "none", color: "#7a8a9a", fontSize: "11px", fontFamily: "Georgia, serif", letterSpacing: "1px", cursor: "pointer", textDecoration: "underline" }}>Copy text</button>
+          <button onClick={function() { setShowQR(function(v) { return !v; }); }} style={{ background: "transparent", border: "none", color: "#7a8a9a", fontSize: "11px", fontFamily: "Georgia, serif", letterSpacing: "1px", cursor: "pointer", textDecoration: "underline" }}>{showQR ? "Hide QR" : "Get the app"}</button>
+          <button onClick={onDismiss} style={{ background: "transparent", border: "none", color: "#7a8a9a", fontSize: "11px", fontFamily: "Georgia, serif", letterSpacing: "1px", cursor: "pointer", textDecoration: "underline" }}>Done</button>
         </div>
-
-        <div style={{ textAlign: "center", fontSize: "9px", color: "#2a3a4a", marginTop: "12px" }}>Tap outside to dismiss</div><div style={{ textAlign: "center", marginTop: "10px" }}><button onClick={function() { setShowQR(function(v) { return !v; }); }} style={{ background: "transparent", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "8px", padding: "6px 16px", fontSize: "9px", color: GOLD, cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px" }}>{showQR ? "Hide QR" : "Share App"}</button>{showQR && <div style={{ marginTop: "8px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.app</div></div>}</div>
+        {showQR && <div style={{ textAlign: "center", marginTop: "12px" }}><img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://bidtoset.app&color=c8a84e&bgcolor=0a0e1b" alt="QR" style={{ width: "100px", height: "100px", borderRadius: "6px" }} /><div style={{ fontSize: "9px", color: "#6a7a8a", marginTop: "4px" }}>bidtoset.app</div></div>}
       </div>
     </div>
   );
