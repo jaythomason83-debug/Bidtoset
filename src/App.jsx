@@ -1862,16 +1862,10 @@ export default function App() {
       else if (hasLoseScore && s0 <= rules.loseScore) winner = 1;
       else if (hasLoseScore && s1 <= rules.loseScore) winner = 0;
 
-      if (winner !== null) {
-        const gameRecord = buildGameRecord(
-          Object.assign({}, s, { teams: newTeams, rounds: s.rounds.concat([round]) }),
-          winner
-        );
-        saveGameToHistory(gameRecord);
-        pushGameToCloud(gameRecord, rules, winner);
-        // Trigger summary card
-        setTimeout(function() { setShowSummary(true); }, 800);
-      }
+      // Winner is set in state below (winner: winner). Archiving + cloud push are
+      // DEFERRED to confirmFinalScore() so the scorer can undo a fat-fingered
+      // deciding round first — the same one-round window every other round gets.
+      // Nothing is committed here; the live game stays autosaved to STORAGE_KEY.
 
       const lastResult = {
         round: roundNum,
@@ -1927,6 +1921,18 @@ export default function App() {
       });
     });
   }
+  // Commit the game exactly once, only after the scorer confirms the final score.
+  // Deferred from scoreRound so a mis-keyed deciding round can be undone first —
+  // nothing was saved yet, so no duplicate history/cloud rows are possible.
+  function confirmFinalScore() {
+    if (gs.winner === null || gs.archived) return;
+    const gameRecord = buildGameRecord(gs, gs.winner);
+    saveGameToHistory(gameRecord);
+    pushGameToCloud(gameRecord, rules, gs.winner);
+    upd(function(s) { return Object.assign({}, s, { archived: true }); });
+    setShowSummary(true);
+  }
+
   function confirmNewGame() {
     var msg = gs.winner !== null
       ? "Start a new game? This game is saved to History."
@@ -2485,6 +2491,29 @@ export default function App() {
               </div>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Final Score gate — one-round correction window on the deciding round */}
+      {gs.winner !== null && !gs.archived && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 350, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
+          <div style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "24px", width: "100%", maxWidth: "360px", boxShadow: "0 0 40px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontSize: "10px", color: "#8aaabb", letterSpacing: "3px", textAlign: "center", textTransform: "uppercase", marginBottom: "6px" }}>Confirm Final Score</div>
+            <div style={{ fontSize: "18px", color: GOLD, fontWeight: "bold", textAlign: "center", marginBottom: "16px", fontVariant: "small-caps" }}>{gs.teams[gs.winner].name} wins</div>
+            {gs.teams.map(function(t, i) {
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: "10px", marginBottom: "8px", background: i === gs.winner ? "rgba(200,168,78,0.14)" : "rgba(255,255,255,0.04)", border: "1px solid " + (i === gs.winner ? "rgba(200,168,78,0.4)" : "rgba(255,255,255,0.08)") }}>
+                  <span style={{ fontSize: "13px", color: i === gs.winner ? GOLD : "#c8d8e8", fontWeight: "bold" }}>{t.name}</span>
+                  <span style={{ fontSize: "18px", color: i === gs.winner ? GOLD : "#c8d8e8", fontWeight: "bold" }}>{t.score}</span>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: "11px", color: "#8aaabb", textAlign: "center", margin: "12px 0 16px", lineHeight: "1.4" }}>Check the score. Undo the last round to fix an error — once you confirm, the game is saved.</div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={undoLastRound} style={{ flex: "1", background: "transparent", color: "#c89a6a", border: "1px solid rgba(200,120,60,0.5)", borderRadius: "10px", padding: "13px", fontSize: "12px", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", cursor: "pointer" }}>Undo Round {gs.rounds.length}</button>
+              <button onClick={confirmFinalScore} style={{ flex: "1.4", background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "13px", fontSize: "13px", fontWeight: "bold", letterSpacing: "1px", textTransform: "uppercase", cursor: "pointer" }}>♠ Confirm</button>
+            </div>
           </div>
         </div>
       )}
