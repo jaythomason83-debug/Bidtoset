@@ -53,6 +53,13 @@ function saveGameToHistory(gameData) {
   } catch (_) {}
 }
 
+const GAME_VIEW_BASE = "https://rstmlalwjhyeflbmlhfd.supabase.co/functions/v1/game-view?c=";
+function gameViewUrl(code) { return GAME_VIEW_BASE + encodeURIComponent(code); }
+function genShareCode() {
+  try { return crypto.randomUUID(); }
+  catch (_) { return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+}
+
 function buildGameRecord(gs, winner) {
   const now = new Date();
   return {
@@ -95,6 +102,7 @@ async function pushGameToCloud(gameRecord, rules, winnerIndex) {
       teams: gameRecord.teams,
       rounds: gameRecord.rounds,
       rules: rules || null,
+      share_code: gameRecord.shareCode || null,
     }, { onConflict: "owner_id,client_id" }).select("id").single();
     const gameId = gRows && gRows.id;
     if (gameId && wIdx !== null) {
@@ -1014,11 +1022,22 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
       summary.mostBagsPlayer.bags > 0 ? ("🎒 Most Bags: " + summary.mostBagsPlayer.name + " (" + summary.mostBagsPlayer.bags + " bags)") : "",
       summary.sandbaggers.length > 0 ? ("⚠️ Sandbagger Alert: " + summary.sandbaggers.map(function(p) { return p.name; }).join(", ")) : "",
       "",
-      "bidtoset.netlify.app",
+      gs.shareCode ? ("Full recap: " + gameViewUrl(gs.shareCode)) : "",
+      "bidtoset.app",
     ].filter(Boolean).join("\n");
 
     try {
       navigator.clipboard.writeText(lines);
+    } catch (_) {}
+  }
+
+  function shareGame() {
+    if (!gs.shareCode) return;
+    const link = gameViewUrl(gs.shareCode);
+    const text = (winner ? (winner.name + " won " + winner.score + "-" + loser.score) : "Game over") + " \u2014 BidToSet recap";
+    try {
+      if (navigator.share) { navigator.share({ title: "BidToSet Game Recap", text: text, url: link }).catch(function() {}); }
+      else { navigator.clipboard.writeText(link); }
     } catch (_) {}
   }
 
@@ -1087,6 +1106,13 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
               <div style={{ fontSize: "11px", color: "#6a3a3a" }}>≥30% overtrick rate across all games</div>
             </div>
           </div>
+        )}
+
+        {gs.shareCode && (
+          <button onClick={shareGame}
+            style={{ width: "100%", background: "linear-gradient(135deg,#c8a84e,#e8c878)", color: DIM, border: "none", borderRadius: "10px", padding: "14px", fontSize: "12px", fontFamily: "Georgia, serif", fontWeight: "bold", letterSpacing: "2px", textTransform: "uppercase", cursor: "pointer", marginBottom: "10px" }}>
+            Share Game Recap
+          </button>
         )}
 
         {/* Actions */}
@@ -1926,10 +1952,12 @@ export default function App() {
   // nothing was saved yet, so no duplicate history/cloud rows are possible.
   function confirmFinalScore() {
     if (gs.winner === null || gs.archived) return;
+    const shareCode = gs.shareCode || genShareCode();
     const gameRecord = buildGameRecord(gs, gs.winner);
+    gameRecord.shareCode = shareCode;
     saveGameToHistory(gameRecord);
     pushGameToCloud(gameRecord, rules, gs.winner);
-    upd(function(s) { return Object.assign({}, s, { archived: true }); });
+    upd(function(s) { return Object.assign({}, s, { archived: true, shareCode: shareCode }); });
     setShowSummary(true);
   }
 
