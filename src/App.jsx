@@ -2117,7 +2117,59 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
   } catch (_) {}
 }
 async function cloudDeleteRound(cloudGameId, roundNumber) {
-  try { if (cloudGameId && roundNumber) await supabase.from("rounds").delete().eq("game_id", cloudGameId).eq("round_number", roundNumber); } catch (_) {}
+  try { if (cloudGameId && roundNumber) { await supabase.from("rounds").delete().eq("game_id", cloudGameId).eq("round_number", roundNumber); await supabase.from("games").update({ total_rounds: roundNumber - 1 }).eq("id", cloudGameId); } } catch (_) {}
+}
+
+function parseTvCode() {
+  try { return new URLSearchParams(window.location.search).get("tv") || null; } catch (_) { return null; }
+}
+
+function TVScoreboard({ code }) {
+  const [d, setD] = React.useState(null);
+  const [waiting, setWaiting] = React.useState(true);
+  React.useEffect(function() {
+    var base = "https://rstmlalwjhyeflbmlhfd.supabase.co/functions/v1/tv";
+    var alive = true;
+    async function tick() {
+      try {
+        var r = await fetch(base + "?c=" + encodeURIComponent(code) + "&format=json", { cache: "no-store" });
+        var j = await r.json();
+        if (!alive) return;
+        if (j && !j.error) { setD(j); setWaiting(false); } else { setWaiting(true); }
+      } catch (_) {}
+    }
+    tick();
+    var iv = setInterval(tick, 2000);
+    return function() { alive = false; clearInterval(iv); };
+  }, []);
+  var done = d && d.status === "completed";
+  var win = d ? d.winningTeam : null;
+  function panel(i) {
+    var t = (d && d.teams && d.teams[i]) ? d.teams[i] : { name: "\u2014", score: 0, bags: 0 };
+    var isWin = win === i;
+    return (
+      <div style={{ flex: 1, maxWidth: "42vw", background: isWin ? "linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05))" : "rgba(255,255,255,0.03)", border: "0.3vh solid " + (isWin ? "#c8a84e" : "rgba(200,168,78,0.25)"), borderRadius: "2vh", padding: "4vh 3vw", textAlign: "center", boxShadow: isWin ? "0 0 8vh rgba(200,168,78,0.3)" : "none" }}>
+        <div style={{ fontSize: "4vh", color: "#c8a84e", fontWeight: "bold", marginBottom: "1vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+        <div style={{ fontSize: "16vh", fontWeight: "bold", lineHeight: 1, color: isWin ? "#c8a84e" : "#e6edf5" }}>{t.score}</div>
+        <div style={{ fontSize: "2.6vh", color: "#8aaabb", marginTop: "1.5vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : ""}</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3.2vh" }}>
+        \u2660 BidToSet <span style={{ color: "#8aaabb" }}>{waiting ? "\u00b7 waiting for game\u2026" : (done ? "\u00b7 Final" : ("\u00b7 Round " + (d.round || 0)))}</span>
+        {!done && !waiting && <span style={{ color: "#6dbf8e", fontSize: "2vh", letterSpacing: "0.2vw", fontFamily: "Arial, sans-serif" }}><span style={{ display: "inline-block", width: "1.4vh", height: "1.4vh", borderRadius: "50%", background: "#6dbf8e", marginRight: "0.6vw" }} />LIVE</span>}
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw" }}>
+        {panel(0)}
+        <div style={{ fontSize: "4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
+        {panel(1)}
+      </div>
+      <div style={{ textAlign: "center", fontSize: "4vh", color: "#c8a84e", height: "6vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("\u2660 " + d.teams[win].name + " wins") : ""}</div>
+      <div style={{ textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" }}>bidtoset.app \u00b7 live scoreboard</div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -2127,7 +2179,8 @@ export default function App() {
   const startedCloudGame = useRef(null);
   const [scoreShake, setScoreShake] = useState(false);
   const [claim, setClaim] = useState(parseClaimParams);
-  useEffect(function() { if (!claim) ensureAnonSession(); }, []);
+  const [tvCode] = useState(parseTvCode);
+  useEffect(function() { if (!claim && !tvCode) ensureAnonSession(); }, []);
   // Live cloud write: create the game in the cloud the moment a new one starts.
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
@@ -2476,6 +2529,7 @@ export default function App() {
   const anyWheel = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) === 13; });
   const scoreBtnLabel = anyBidOver13 ? "Team bid cannot exceed 13" : anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
 
+  if (tvCode) return <TVScoreboard code={tvCode} />;
   if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} onReset={function() { setScreen("game"); reset(); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
   if (screen === "stats") return <StatsScreen onClose={function() { setScreen("game"); }} />;
