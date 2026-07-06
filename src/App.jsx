@@ -58,7 +58,7 @@ function saveGameToHistory(gameData) {
   } catch (_) {}
 }
 
-const GAME_VIEW_BASE = "https://rstmlalwjhyeflbmlhfd.supabase.co/functions/v1/game-view?c=";
+const GAME_VIEW_BASE = "https://bidtoset.app/?recap=";
 function gameViewUrl(code) { return GAME_VIEW_BASE + encodeURIComponent(code); }
 function genShareCode() {
   try { return crypto.randomUUID(); }
@@ -2171,6 +2171,85 @@ function TVScoreboard({ code }) {
   );
 }
 
+function parseRecapCode() {
+  try { return new URLSearchParams(window.location.search).get("recap") || null; } catch (_) { return null; }
+}
+
+function RecapView({ code }) {
+  const [d, setD] = React.useState(null);
+  const [st, setSt] = React.useState("loading");
+  React.useEffect(function() {
+    var alive = true;
+    async function load() {
+      try {
+        var res = await supabase.functions.invoke("game-view", { body: { c: code } });
+        var j = res && res.data;
+        if (!alive) return;
+        if (j && !j.error) { setD(j); setSt("ready"); } else { setSt("error"); }
+      } catch (_) { setSt("error"); }
+    }
+    load();
+    return function() { alive = false; };
+  }, []);
+  function wrap(inner) {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "#0a0e1b", overflowY: "auto", color: "#c8d8e8", fontFamily: "-apple-system, Segoe UI, Roboto, sans-serif", padding: "24px 16px 48px", zIndex: 99999 }}>
+        <div style={{ maxWidth: "440px", margin: "0 auto" }}>{inner}</div>
+      </div>
+    );
+  }
+  if (st === "loading") return wrap(<div style={{ textAlign: "center", color: "#8aaabb", padding: "60px 0" }}>Loading recap\u2026</div>);
+  if (st === "error" || !d) return wrap(<div style={{ textAlign: "center", padding: "60px 0" }}><div style={{ fontSize: "30px", color: GOLD }}>\u2660</div><div style={{ color: "#8aaabb", marginTop: "10px" }}>This game link isn't valid anymore.</div><a href="https://bidtoset.app" style={{ display: "inline-block", marginTop: "16px", background: GOLD, color: "#0a0e1b", textDecoration: "none", fontWeight: "bold", padding: "12px 22px", borderRadius: "10px" }}>Score your own \u2192</a></div>);
+  var win = d.winningTeam;
+  var wTeam = (win === 0 || win === 1) ? d.teams[win] : null;
+  var lTeam = (win === 0 || win === 1) ? d.teams[win === 0 ? 1 : 0] : null;
+  function playerRow(p) {
+    var nilStr = p.nilAtt > 0 ? (" \u00b7 nil " + p.nilSucc + "/" + p.nilAtt) : "";
+    return (
+      <div key={p.seat} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid rgba(255,255,255,0.05)", gap: "10px" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontSize: "14px", color: "#e0e8f0", fontWeight: 600 }}>{p.name}{p.isMvp && <span style={{ fontSize: "10px", padding: "2px 7px", borderRadius: "5px", marginLeft: "6px", background: "rgba(109,191,142,0.15)", color: GREEN, border: "1px solid rgba(109,191,142,0.4)" }}>MVP</span>}</span>
+          <span style={{ fontSize: "11px", color: "#8aaabb" }}>{p.acc}% acc \u00b7 {p.bags} bag{p.bags === 1 ? "" : "s"}{nilStr}</span>
+        </div>
+        <a href={"/?claim=" + encodeURIComponent(code) + "&seat=" + p.seat + "&name=" + encodeURIComponent(p.name)} style={{ flexShrink: 0, fontSize: "11px", color: "#0a0e1b", background: GOLD, textDecoration: "none", fontWeight: 700, padding: "6px 12px", borderRadius: "7px" }}>Claim</a>
+      </div>
+    );
+  }
+  function teamBlock(ti) {
+    var t = d.teams[ti];
+    var ps = d.players.filter(function(p) { return p.team === ti; }).sort(function(a, b) { return a.seat - b.seat; });
+    return (
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(200,168,78,0.18)", borderRadius: "12px", padding: "14px", marginBottom: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", color: GOLD, fontWeight: "bold", marginBottom: "4px" }}><span>{t.name}</span><span>{t.score}</span></div>
+        {ps.map(playerRow)}
+      </div>
+    );
+  }
+  return wrap(
+    <div>
+      <div style={{ textAlign: "center", fontSize: "30px", color: GOLD }}>\u2660</div>
+      <div style={{ textAlign: "center", fontSize: "22px", color: GOLD, fontVariant: "small-caps", letterSpacing: "3px" }}>Game Recap</div>
+      <div style={{ textAlign: "center", fontSize: "11px", color: "#6a7a8a", marginBottom: "20px" }}>bidtoset.app</div>
+      {wTeam && (
+        <div style={{ background: "linear-gradient(135deg,rgba(200,168,78,.14),rgba(200,168,78,.24))", border: "1px solid " + GOLD, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "16px" }}>
+          <div style={{ fontSize: "11px", color: "#a08040", letterSpacing: "3px" }}>WINNER</div>
+          <div style={{ fontSize: "22px", color: GOLD, fontWeight: "bold" }}>{wTeam.name}</div>
+          <div style={{ fontSize: "34px", color: GOLD, fontWeight: "bold", lineHeight: 1.1 }}>{wTeam.score}</div>
+          <div style={{ fontSize: "13px", color: "#6a7a8a", marginTop: "4px" }}>vs {lTeam.name} \u2014 {lTeam.score}</div>
+          <div style={{ fontSize: "11px", color: "#4a5a6a", marginTop: "3px" }}>{d.rounds} rounds</div>
+        </div>
+      )}
+      <div style={{ textAlign: "center", fontSize: "12px", color: "#8aaabb", margin: "2px 0 14px" }}>Is one of these you? Tap <b>Claim</b> to keep your stats.</div>
+      {teamBlock(0)}
+      {teamBlock(1)}
+      <div style={{ textAlign: "center", marginTop: "22px" }}>
+        <a href="https://bidtoset.app" style={{ display: "inline-block", background: GOLD, color: "#0a0e1b", textDecoration: "none", fontWeight: 700, fontSize: "13px", letterSpacing: "1px", padding: "12px 22px", borderRadius: "10px", textTransform: "uppercase" }}>Score your own \u2192</a>
+        <div style={{ color: "#6a7a8a", fontSize: "11px", marginTop: "14px" }}>Made with \u2660 BidToSet</div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
@@ -2179,7 +2258,9 @@ export default function App() {
   const [scoreShake, setScoreShake] = useState(false);
   const [claim, setClaim] = useState(parseClaimParams);
   const [tvCode] = useState(parseTvCode);
-  useEffect(function() { if (!claim && !tvCode) ensureAnonSession(); }, []);
+  const [recapCode] = useState(parseRecapCode);
+  const [showCast, setShowCast] = useState(false);
+  useEffect(function() { if (!claim && !tvCode && !recapCode) ensureAnonSession(); }, []);
   // Live cloud write: create the game in the cloud the moment a new one starts.
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
@@ -2528,6 +2609,7 @@ export default function App() {
   const anyWheel = gs.teams.some(function(_, ti) { var e = gs.entry[ti] || {}; var b1 = parseInt(e.p1bid || 0); var b2 = parseInt(e.p2bid || 0); return (b1 + b2) === 13; });
   const scoreBtnLabel = anyBidOver13 ? "Team bid cannot exceed 13" : anyTricksMismatch ? "Tricks must total exactly 13" : anyBidOne ? "Score Round (Override)" : anySet ? "Score Round (SET)" : anyBlindNil ? "Score Blind Nil Round" : canScore ? (anyWheel ? "HOLD MY BEER" : "Score Round") : "Fill in all fields…";
 
+  if (recapCode) return <RecapView code={recapCode} />;
   if (tvCode) return <TVScoreboard code={tvCode} />;
   if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} onReset={function() { setScreen("game"); reset(); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
@@ -2979,6 +3061,28 @@ export default function App() {
         </div>
       )}
 
+      {showCast && (
+        <div onClick={function() { setShowCast(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", zIndex: 9600, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "26px", width: "100%", maxWidth: "340px", textAlign: "center" }}>
+            <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px" }}>Cast to TV</div>
+            {gs.shareCode ? (
+              <div>
+                <img src={"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent("https://bidtoset.app/?tv=" + gs.shareCode) + "&color=c8a84e&bgcolor=141926"} alt="QR" style={{ width: "180px", height: "180px", borderRadius: "8px" }} />
+                <div style={{ fontSize: "12px", color: "#c8d8e8", margin: "14px 0 4px", lineHeight: "1.5" }}>Scan on the TV, or open this on any screen and cast the tab:</div>
+                <div style={{ fontSize: "11px", color: GOLD, wordBreak: "break-all", marginBottom: "14px" }}>bidtoset.app/?tv={gs.shareCode}</div>
+                <button onClick={function() { try { navigator.clipboard.writeText("https://bidtoset.app/?tv=" + gs.shareCode); } catch (_) {} }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "11px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "10px" }}>Copy link</button>
+                <button onClick={function() { setShowCast(false); }} style={{ background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Close</button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: "13px", color: "#c8d8e8", margin: "8px 0 18px", lineHeight: "1.5" }}>Start a game first \u2014 then you can cast the live scoreboard to your TV.</div>
+                <button onClick={function() { setShowCast(false); }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "10px 24px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>OK</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Confirm Final Score gate — one-round correction window on the deciding round */}
       {claim && <ClaimFlow code={claim.code} seat={claim.seat} name={claim.name} onClose={function() { setClaim(null); try { window.history.replaceState({}, "", window.location.pathname); } catch (_) {} }} />}
 
@@ -3018,6 +3122,7 @@ export default function App() {
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", gap: "0", background: "rgba(35,30,40,0.98)", borderTop: "2px solid rgba(200,168,78,0.7)", padding: "6px 12px", paddingBottom: "env(safe-area-inset-bottom, 8px)", zIndex: 9000, backdropFilter: "blur(10px)" }}>
         <button onClick={function() { setShowSummary(false); setScreen("history"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "history" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>📋</span>History</button>
         <button onClick={function() { setShowSummary(false); setScreen("stats"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "stats" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>📊</span>Stats</button>
+        <button onClick={function() { setShowCast(true); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>📺</span>Cast</button>
         <button onClick={function() { setShowSummary(false); setScreen("settings"); }} style={{ flex: 1, background: "transparent", border: "none", padding: "8px 4px", fontSize: "9px", color: screen === "settings" ? GOLD : "#a0b0c0", cursor: "pointer", fontFamily: "Georgia, serif", letterSpacing: "1px", textTransform: "uppercase", display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}><span style={{ fontSize: "30px" }}>⚙</span>Rules</button>
       </div>      <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
