@@ -2158,7 +2158,7 @@ function TVScoreboard({ code }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3.2vh" }}>
-        \u2660 BidToSet <span style={{ color: "#8aaabb" }}>{waiting ? "\u00b7 waiting for game\u2026" : (done ? "\u00b7 Final" : ("\u00b7 Round " + (d.round || 0)))}</span>
+        ♠ BidToSet <span style={{ color: "#8aaabb" }}>{waiting ? "\u00b7 waiting for game\u2026" : (done ? "\u00b7 Final" : ("\u00b7 Round " + (d.round || 0)))}</span>
         {!done && !waiting && <span style={{ color: "#6dbf8e", fontSize: "2vh", letterSpacing: "0.2vw", fontFamily: "Arial, sans-serif" }}><span style={{ display: "inline-block", width: "1.4vh", height: "1.4vh", borderRadius: "50%", background: "#6dbf8e", marginRight: "0.6vw" }} />LIVE</span>}
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw" }}>
@@ -2167,7 +2167,7 @@ function TVScoreboard({ code }) {
         {panel(1)}
       </div>
       <div style={{ textAlign: "center", fontSize: "4vh", color: "#c8a84e", height: "6vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("\u2660 " + d.teams[win].name + " wins") : ""}</div>
-      <div style={{ textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" }}>bidtoset.app \u00b7 live scoreboard</div>
+      <div style={{ textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" }}>bidtoset.app · live scoreboard</div>
     </div>
   );
 }
