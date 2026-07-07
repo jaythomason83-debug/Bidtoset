@@ -90,6 +90,26 @@ async function ensureAnonSession() {
     if (!data || !data.session) await supabase.auth.signInAnonymously();
   } catch (_) {}
 }
+const CAST_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function genCastCode() {
+  var s = "";
+  try {
+    var arr = new Uint8Array(6); crypto.getRandomValues(arr);
+    for (var i = 0; i < 6; i++) s += CAST_ALPHABET[arr[i] % CAST_ALPHABET.length];
+  } catch (_) { for (var j = 0; j < 6; j++) s += CAST_ALPHABET[Math.floor(Math.random() * CAST_ALPHABET.length)]; }
+  return s;
+}
+async function ensureCastCode() {
+  try {
+    var code = null;
+    try { code = localStorage.getItem("bidtoset_cast"); } catch (_) {}
+    if (!code) { code = genCastCode(); try { localStorage.setItem("bidtoset_cast", code); } catch (_) {} }
+    const { data } = await supabase.auth.getUser();
+    const user = data && data.user;
+    if (user) await supabase.from("cast_links").upsert({ code: code, owner_id: user.id }, { onConflict: "code", ignoreDuplicates: true });
+    return code;
+  } catch (_) { return null; }
+}
 async function pushGameToCloud(gameRecord, rules, winnerIndex) {
   try {
     const { data } = await supabase.auth.getUser();
@@ -2041,7 +2061,7 @@ function genCloudId() {
   try { return crypto.randomUUID(); }
   catch (_) { return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){ var r = Math.random()*16|0; return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16); }); }
 }
-async function cloudStartGame(cloudGameId, clientId, shareCode, teams) {
+async function cloudStartGame(cloudGameId, clientId, shareCode, teams, rules) {
   try {
     if (!cloudGameId || !teams || teams.length !== 2) return;
     const { data: u } = await supabase.auth.getUser();
@@ -2050,6 +2070,7 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams) {
       id: cloudGameId, owner_id: user.id, client_id: clientId,
       status: "in_progress", started_at: new Date().toISOString(), played_at: new Date(clientId).toISOString(),
       share_code: shareCode, winner_team: null, total_rounds: 0,
+      rules: rules || null,
       teams: teams.map(function(t){ return { name: t.name, score: 0, bags: 0, p: [t.p[0], t.p[1]] }; }),
       rounds: [],
     }, { onConflict: "owner_id,client_id" }).select("short_code").single();
@@ -2072,6 +2093,12 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams) {
       seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
       { onConflict: "game_id,seat" });
     return shortCode;
+  } catch (_) {}
+}
+async function cloudUpdateRules(cloudGameId, rules) {
+  try {
+    if (!cloudGameId) return;
+    await supabase.from("games").update({ rules: rules || null }).eq("id", cloudGameId);
   } catch (_) {}
 }
 async function cloudEnsureParticipants(cloudGameId) {
@@ -2131,6 +2158,7 @@ function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
   const [waiting, setWaiting] = React.useState(true);
   const [banner, setBanner] = React.useState(null);
+  const [reelIdx, setReelIdx] = React.useState(0);
   const lastBannerRound = React.useRef(-1);
   const bannerTimer = React.useRef(null);
   React.useEffect(function() {
@@ -2142,12 +2170,13 @@ function TVScoreboard({ code }) {
         if (!alive) return;
         if (j && !j.error) {
           setD(j); setWaiting(false);
-          if (j.event && j.event.banner && j.status !== "completed" && j.event.roundNumber !== lastBannerRound.current) {
+          if (j.mode === "live" && j.event && j.event.banner && j.event.roundNumber !== lastBannerRound.current) {
             lastBannerRound.current = j.event.roundNumber;
             setBanner(j.event.banner);
             if (bannerTimer.current) clearTimeout(bannerTimer.current);
             bannerTimer.current = setTimeout(function() { setBanner(null); }, 6500);
           }
+          if (j.mode !== "live" && banner) setBanner(null);
         } else { setWaiting(true); }
       } catch (_) {}
     }
@@ -2155,6 +2184,53 @@ function TVScoreboard({ code }) {
     var iv = setInterval(tick, 2000);
     return function() { alive = false; clearInterval(iv); if (bannerTimer.current) clearTimeout(bannerTimer.current); };
   }, []);
+  var reelLen = (d && d.mode === "recap" && d.highlights) ? d.highlights.length : 0;
+  React.useEffect(function() {
+    if (reelLen <= 1) return;
+    var iv = setInterval(function() { setReelIdx(function(i) { return (i + 1) % reelLen; }); }, 5000);
+    return function() { clearInterval(iv); };
+  }, [reelLen]);
+
+  var container = { position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 };
+  var foot = { textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" };
+
+  if (d && d.mode === "recap") {
+    var hl = d.highlights || [];
+    var cur = hl.length ? hl[reelIdx % hl.length] : null;
+    var roast = cur && (cur.kind === "deadweight" || cur.kind === "nilbust" || cur.kind === "bags");
+    return (
+      <div style={container}>
+        <style>{"@keyframes btsfade{0%{opacity:0;transform:translateY(1.6vh)}100%{opacity:1;transform:translateY(0)}}"}</style>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
+          ♠ BidToSet <span style={{ color: "#8aaabb" }}>· Last game recap</span>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {cur && (
+            <div key={reelIdx} style={{ textAlign: "center", padding: "0 4vw", animation: "btsfade 0.6s ease" }}>
+              <div style={{ fontSize: "6.5vh", color: roast ? "#e0605c" : "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.35vw", fontWeight: "bold", marginBottom: "2vh" }}>{cur.headline}</div>
+              <div style={{ fontSize: "13vh", lineHeight: 1, color: "#f0ead8", fontWeight: "bold", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cur.name}</div>
+              <div style={{ fontSize: "3.4vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2.4vh" }}>{cur.sub}</div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "1.4vw", height: "3.4vh" }}>
+          {hl.map(function(_, i) { return <span key={i} style={{ width: "1.3vh", height: "1.3vh", borderRadius: "50%", background: i === (reelIdx % (hl.length || 1)) ? "#c8a84e" : "rgba(255,255,255,0.18)" }} />; })}
+        </div>
+        <div style={foot}>bidtoset.app · game recap</div>
+      </div>
+    );
+  }
+
+  if (d && d.mode === "empty") {
+    return (
+      <div style={container}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>♠ BidToSet</div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#8aaabb", fontSize: "4vh", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>Waiting for the next game…</div>
+        <div style={foot}>bidtoset.app · live scoreboard</div>
+      </div>
+    );
+  }
+
   var done = d && d.status === "completed";
   var win = d ? d.winningTeam : null;
   var strip = d && d.strip;
@@ -2171,8 +2247,8 @@ function TVScoreboard({ code }) {
         <div style={{ height: "1.1vh", background: "rgba(255,255,255,0.08)", borderRadius: "99px", overflow: "hidden", margin: "2vh 0 0.9vh" }}>
           <div style={{ width: fillPct + "%", height: "100%", background: fillColor, borderRadius: "99px", transition: "width 0.5s ease" }} />
         </div>
-        <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
-        <div style={{ fontSize: "2.1vh", color: "#8aaabb", marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : " "}</div>
+        <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
+        <div style={{ fontSize: "2.1vh", color: "#8aaabb", marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : " "}</div>
       </div>
     );
   }
@@ -2182,7 +2258,7 @@ function TVScoreboard({ code }) {
     );
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 }}>
+    <div style={container}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
         ♠ BidToSet
         {d && !waiting && <span style={{ color: "#8aaabb" }}>{"· Target " + (d.winScore || 0)}</span>}
@@ -2206,7 +2282,7 @@ function TVScoreboard({ code }) {
         {strip && strip.deadWeight && stripItem("Dead Weight", strip.deadWeight.name + " " + strip.deadWeight.pct + "%", !strip.heavyLifter)}
         {strip && strip.bidLeader && stripItem("Bid leader", strip.bidLeader.name + " " + strip.bidLeader.made + "/" + strip.bidLeader.att, !(strip.heavyLifter || strip.deadWeight))}
       </div>
-      <div style={{ textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" }}>bidtoset.app · live scoreboard</div>
+      <div style={foot}>bidtoset.app · live scoreboard</div>
     </div>
   );
 }
@@ -2300,15 +2376,16 @@ export default function App() {
   const [tvCode] = useState(parseTvCode);
   const [recapCode] = useState(parseRecapCode);
   const [showCast, setShowCast] = useState(false);
+  const [castCode, setCastCode] = useState(null);
   const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({ onRegisteredSW: function(_u, r) { if (r) setInterval(function() { try { r.update(); } catch (_) {} }, 60000); } });
-  useEffect(function() { if (!claim && !tvCode && !recapCode) ensureAnonSession(); }, []);
+  useEffect(function() { if (!claim && !tvCode && !recapCode) ensureAnonSession().then(function() { ensureCastCode().then(setCastCode); }); }, []);
   // Live cloud write: create the game in the cloud the moment a new one starts.
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
       startedCloudGame.current = gs.cloudGameId;
       lastPushedRound.current = gs.rounds ? gs.rounds.length : 0;
       var cid = gs.cloudGameId;
-      cloudStartGame(cid, gs.gameId, gs.shareCode, gs.teams).then(function(sc) {
+      cloudStartGame(cid, gs.gameId, gs.shareCode, gs.teams, rules).then(function(sc) {
         if (sc) setGs(function(s) { return s.cloudGameId === cid ? Object.assign({}, s, { shortCode: sc }) : s; });
       });
     }
@@ -2330,6 +2407,10 @@ export default function App() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
+  // Keep the live cloud game's rules in sync (house-rule win-score changes mid-game) so the TV progress bar tracks the real target.
+  useEffect(function() {
+    if (gs.cloudGameId && startedCloudGame.current === gs.cloudGameId) cloudUpdateRules(gs.cloudGameId, rules);
+  }, [rules, gs.cloudGameId]);
   const [showSummary, setShowSummary] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(!hasOnboarded());
   const [showSetup, setShowSetup] = useState(function() {
@@ -3116,17 +3197,17 @@ export default function App() {
         <div onClick={function() { setShowCast(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", zIndex: 9600, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "26px", width: "100%", maxWidth: "340px", textAlign: "center" }}>
             <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px" }}>Cast to TV</div>
-            {gs.shareCode ? (
+            {castCode ? (
               <div>
-                <img src={"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent("https://bidtoset.app/?tv=" + (gs.shortCode || gs.shareCode)) + "&color=c8a84e&bgcolor=141926"} alt="QR" style={{ width: "180px", height: "180px", borderRadius: "8px" }} />
-                <div style={{ fontSize: "12px", color: "#c8d8e8", margin: "14px 0 4px", lineHeight: "1.5" }}>Scan on the TV, or open this on any screen and cast the tab:</div>
-                <div style={{ fontSize: "11px", color: GOLD, wordBreak: "break-all", marginBottom: "14px" }}>bidtoset.app/?tv={gs.shortCode || gs.shareCode}</div>
-                <button onClick={function() { try { navigator.clipboard.writeText("https://bidtoset.app/?tv=" + (gs.shortCode || gs.shareCode)); } catch (_) {} }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "11px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "10px" }}>Copy link</button>
+                <img src={"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent("https://bidtoset.app/?tv=" + castCode) + "&color=c8a84e&bgcolor=141926"} alt="QR" style={{ width: "180px", height: "180px", borderRadius: "8px" }} />
+                <div style={{ fontSize: "12px", color: "#c8d8e8", margin: "14px 0 4px", lineHeight: "1.5" }}>Cast once — this link follows every game you play. Scan on the TV or cast the tab:</div>
+                <div style={{ fontSize: "11px", color: GOLD, wordBreak: "break-all", marginBottom: "14px" }}>bidtoset.app/?tv={castCode}</div>
+                <button onClick={function() { try { navigator.clipboard.writeText("https://bidtoset.app/?tv=" + castCode); } catch (_) {} }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "11px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "10px" }}>Copy link</button>
                 <button onClick={function() { setShowCast(false); }} style={{ background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Close</button>
               </div>
             ) : (
               <div>
-                <div style={{ fontSize: "13px", color: "#c8d8e8", margin: "8px 0 18px", lineHeight: "1.5" }}>Start a game first \u2014 then you can cast the live scoreboard to your TV.</div>
+                <div style={{ fontSize: "13px", color: "#c8d8e8", margin: "8px 0 18px", lineHeight: "1.5" }}>Setting up your cast link…</div>
                 <button onClick={function() { setShowCast(false); }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "10px 24px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>OK</button>
               </div>
             )}
