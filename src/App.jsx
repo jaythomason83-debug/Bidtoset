@@ -2130,6 +2130,9 @@ function parseTvCode() {
 function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
   const [waiting, setWaiting] = React.useState(true);
+  const [banner, setBanner] = React.useState(null);
+  const lastBannerRound = React.useRef(-1);
+  const bannerTimer = React.useRef(null);
   React.useEffect(function() {
     var alive = true;
     async function tick() {
@@ -2137,38 +2140,72 @@ function TVScoreboard({ code }) {
         var res = await supabase.functions.invoke("tv", { body: { c: code } });
         var j = res && res.data;
         if (!alive) return;
-        if (j && !j.error) { setD(j); setWaiting(false); } else { setWaiting(true); }
+        if (j && !j.error) {
+          setD(j); setWaiting(false);
+          if (j.event && j.event.banner && j.status !== "completed" && j.event.roundNumber !== lastBannerRound.current) {
+            lastBannerRound.current = j.event.roundNumber;
+            setBanner(j.event.banner);
+            if (bannerTimer.current) clearTimeout(bannerTimer.current);
+            bannerTimer.current = setTimeout(function() { setBanner(null); }, 6500);
+          }
+        } else { setWaiting(true); }
       } catch (_) {}
     }
     tick();
     var iv = setInterval(tick, 2000);
-    return function() { alive = false; clearInterval(iv); };
+    return function() { alive = false; clearInterval(iv); if (bannerTimer.current) clearTimeout(bannerTimer.current); };
   }, []);
   var done = d && d.status === "completed";
   var win = d ? d.winningTeam : null;
+  var strip = d && d.strip;
   function panel(i) {
-    var t = (d && d.teams && d.teams[i]) ? d.teams[i] : { name: "\u2014", score: 0, bags: 0 };
+    var t = (d && d.teams && d.teams[i]) ? d.teams[i] : { name: "—", score: 0, bags: 0, pct: 0, toGo: null, danger: 0 };
     var isWin = win === i;
+    var danger = (t.danger || 0) > 0;
+    var fillPct = danger ? t.danger : (t.pct || 0);
+    var fillColor = danger ? "#e0605c" : "#c8a84e";
     return (
-      <div style={{ flex: 1, maxWidth: "42vw", background: isWin ? "linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05))" : "rgba(255,255,255,0.03)", border: "0.3vh solid " + (isWin ? "#c8a84e" : "rgba(200,168,78,0.25)"), borderRadius: "2vh", padding: "4vh 3vw", textAlign: "center", boxShadow: isWin ? "0 0 8vh rgba(200,168,78,0.3)" : "none" }}>
-        <div style={{ fontSize: "4vh", color: "#c8a84e", fontWeight: "bold", marginBottom: "1vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-        <div style={{ fontSize: "16vh", fontWeight: "bold", lineHeight: 1, color: isWin ? "#c8a84e" : "#e6edf5" }}>{t.score}</div>
-        <div style={{ fontSize: "2.6vh", color: "#8aaabb", marginTop: "1.5vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : ""}</div>
+      <div style={{ flex: 1, maxWidth: "42vw", background: isWin ? "linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05))" : "rgba(255,255,255,0.03)", border: "0.3vh solid " + (isWin ? "#c8a84e" : "rgba(200,168,78,0.25)"), borderRadius: "2vh", padding: "3.4vh 3vw", textAlign: "center", boxShadow: isWin ? "0 0 8vh rgba(200,168,78,0.3)" : "none" }}>
+        <div style={{ fontSize: "3.6vh", color: "#c8a84e", fontWeight: "bold", marginBottom: "0.8vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+        <div style={{ fontSize: "14vh", fontWeight: "bold", lineHeight: 1, color: isWin ? "#c8a84e" : (danger ? "#e0605c" : "#e6edf5") }}>{t.score}</div>
+        <div style={{ height: "1.1vh", background: "rgba(255,255,255,0.08)", borderRadius: "99px", overflow: "hidden", margin: "2vh 0 0.9vh" }}>
+          <div style={{ width: fillPct + "%", height: "100%", background: fillColor, borderRadius: "99px", transition: "width 0.5s ease" }} />
+        </div>
+        <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
+        <div style={{ fontSize: "2.1vh", color: "#8aaabb", marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : " "}</div>
       </div>
+    );
+  }
+  function stripItem(label, value, first) {
+    return (
+      <span style={{ padding: "0 1.6vw", borderLeft: first ? "none" : "1px solid rgba(255,255,255,0.12)" }}><span style={{ color: "#c8a84e" }}>{label}</span> · {value}</span>
     );
   }
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3.2vh" }}>
-        ♠ BidToSet <span style={{ color: "#8aaabb" }}>{waiting ? "\u00b7 waiting for game\u2026" : (done ? "\u00b7 Final" : ("\u00b7 Round " + (d.round || 0)))}</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
+        ♠ BidToSet
+        {d && !waiting && <span style={{ color: "#8aaabb" }}>{"· Target " + (d.winScore || 0)}</span>}
+        <span style={{ color: "#8aaabb" }}>{waiting ? "· waiting for game…" : (done ? "· Final" : ("· Round " + (d.round || 0)))}</span>
         {!done && !waiting && <span style={{ color: "#6dbf8e", fontSize: "2vh", letterSpacing: "0.2vw", fontFamily: "Arial, sans-serif" }}><span style={{ display: "inline-block", width: "1.4vh", height: "1.4vh", borderRadius: "50%", background: "#6dbf8e", marginRight: "0.6vw" }} />LIVE</span>}
       </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative" }}>
         {panel(0)}
-        <div style={{ fontSize: "4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
+        <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
         {panel(1)}
+        {banner && !done && (
+          <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", background: "#c8a84e", color: "#2a1e04", padding: "2vh 4vw", borderRadius: "99px", textAlign: "center", boxShadow: "0 0 9vh rgba(200,168,78,0.55)", maxWidth: "84vw" }}>
+            <div style={{ fontSize: "5.4vh", lineHeight: 1.05, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{"♠ " + banner.headline}</div>
+            <div style={{ fontSize: "2.6vh", fontFamily: "Arial, sans-serif", letterSpacing: "0.06vw", marginTop: "0.6vh" }}>{banner.sub}</div>
+          </div>
+        )}
       </div>
-      <div style={{ textAlign: "center", fontSize: "4vh", color: "#c8a84e", height: "6vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("\u2660 " + d.teams[win].name + " wins") : ""}</div>
+      <div style={{ textAlign: "center", fontSize: "3.6vh", color: "#c8a84e", height: "4.4vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("♠ " + d.teams[win].name + " wins") : ""}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "4.2vh", fontFamily: "Arial, sans-serif", fontSize: "2vh", color: "#8aaabb", borderTop: strip ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
+        {strip && strip.heavyLifter && stripItem("Heavy Lifter", strip.heavyLifter.name + " " + strip.heavyLifter.pct + "%", true)}
+        {strip && strip.deadWeight && stripItem("Dead Weight", strip.deadWeight.name + " " + strip.deadWeight.pct + "%", !strip.heavyLifter)}
+        {strip && strip.bidLeader && stripItem("Bid leader", strip.bidLeader.name + " " + strip.bidLeader.made + "/" + strip.bidLeader.att, !(strip.heavyLifter || strip.deadWeight))}
+      </div>
       <div style={{ textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" }}>bidtoset.app · live scoreboard</div>
     </div>
   );
