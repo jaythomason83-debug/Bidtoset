@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./lib/supabase";
+import { useRegisterSW } from "virtual:pwa-register/react";
 
 const WINNING_SCORE = 500;
 const LOSING_SCORE = -200;
@@ -2045,30 +2046,32 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams) {
     if (!cloudGameId || !teams || teams.length !== 2) return;
     const { data: u } = await supabase.auth.getUser();
     const user = u && u.user; if (!user) return;
-    await supabase.from("games").upsert({
+    const { data: gRow } = await supabase.from("games").upsert({
       id: cloudGameId, owner_id: user.id, client_id: clientId,
       status: "in_progress", started_at: new Date().toISOString(), played_at: new Date(clientId).toISOString(),
       share_code: shareCode, winner_team: null, total_rounds: 0,
       teams: teams.map(function(t){ return { name: t.name, score: 0, bags: 0, p: [t.p[0], t.p[1]] }; }),
       rounds: [],
-    }, { onConflict: "owner_id,client_id" });
+    }, { onConflict: "owner_id,client_id" }).select("short_code").single();
+    const shortCode = gRow ? gRow.short_code : null;
     const seatDefs = [
       { name: teams[0].p[0], team: 0, seat: 0 }, { name: teams[1].p[0], team: 1, seat: 1 },
       { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
     ];
-    if (seatDefs.some(function(x){ return !x.name; })) return;
+    if (seatDefs.some(function(x){ return !x.name; })) return shortCode;
     const uniq = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
-    if (uniq.length !== 4) return;
+    if (uniq.length !== 4) return shortCode;
     const { data: pRows } = await supabase.from("players")
       .upsert(uniq.map(function(n){ return { owner_id: user.id, name: n }; }), { onConflict: "owner_id,name" })
       .select("id,name");
-    if (!pRows) return;
+    if (!pRows) return shortCode;
     const idByName = {}; pRows.forEach(function(r){ idByName[r.name] = r.id; });
     const seatToPid = {}; seatDefs.forEach(function(x){ seatToPid[x.seat] = idByName[x.name]; });
     __btsParticipants[cloudGameId] = seatToPid;
     await supabase.from("game_participants").upsert(
       seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
       { onConflict: "game_id,seat" });
+    return shortCode;
   } catch (_) {}
 }
 async function cloudEnsureParticipants(cloudGameId) {
@@ -2260,13 +2263,17 @@ export default function App() {
   const [tvCode] = useState(parseTvCode);
   const [recapCode] = useState(parseRecapCode);
   const [showCast, setShowCast] = useState(false);
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({ onRegisteredSW: function(_u, r) { if (r) setInterval(function() { try { r.update(); } catch (_) {} }, 60000); } });
   useEffect(function() { if (!claim && !tvCode && !recapCode) ensureAnonSession(); }, []);
   // Live cloud write: create the game in the cloud the moment a new one starts.
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
       startedCloudGame.current = gs.cloudGameId;
       lastPushedRound.current = gs.rounds ? gs.rounds.length : 0;
-      cloudStartGame(gs.cloudGameId, gs.gameId, gs.shareCode, gs.teams);
+      var cid = gs.cloudGameId;
+      cloudStartGame(cid, gs.gameId, gs.shareCode, gs.teams).then(function(sc) {
+        if (sc) setGs(function(s) { return s.cloudGameId === cid ? Object.assign({}, s, { shortCode: sc }) : s; });
+      });
     }
   }, [gs.cloudGameId]);
   // Live cloud write: push each round as scored; delete the cloud round on undo.
@@ -2618,6 +2625,13 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: BG, backgroundImage: "radial-gradient(ellipse at 20% 50%, #0c1e3a 0%, transparent 50%), radial-gradient(ellipse at 80% 10%, #180a2a 0%, transparent 50%)", fontFamily: "Georgia, serif", color: "#e8dcc8", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
       <div style={{ width: "100%", maxWidth: "520px", display: "flex", flexDirection: "column", minHeight: "100vh", paddingBottom: "70px" }}>
+
+        {needRefresh && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 99998, background: GOLD, color: "#0a0e1b", padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", fontFamily: "Georgia, serif", fontSize: "13px", fontWeight: "bold" }}>
+            New version available
+            <button onClick={function() { updateServiceWorker(true); }} style={{ background: "#0a0e1b", color: GOLD, border: "none", borderRadius: "8px", padding: "6px 14px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}>Refresh</button>
+          </div>
+        )}
 
         {/* STICKY HEADER */}
         <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(9,13,27,0.97)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(200,168,78,0.1)", padding: "10px 14px" }}>
@@ -3067,10 +3081,10 @@ export default function App() {
             <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px" }}>Cast to TV</div>
             {gs.shareCode ? (
               <div>
-                <img src={"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent("https://bidtoset.app/?tv=" + gs.shareCode) + "&color=c8a84e&bgcolor=141926"} alt="QR" style={{ width: "180px", height: "180px", borderRadius: "8px" }} />
+                <img src={"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent("https://bidtoset.app/?tv=" + (gs.shortCode || gs.shareCode)) + "&color=c8a84e&bgcolor=141926"} alt="QR" style={{ width: "180px", height: "180px", borderRadius: "8px" }} />
                 <div style={{ fontSize: "12px", color: "#c8d8e8", margin: "14px 0 4px", lineHeight: "1.5" }}>Scan on the TV, or open this on any screen and cast the tab:</div>
-                <div style={{ fontSize: "11px", color: GOLD, wordBreak: "break-all", marginBottom: "14px" }}>bidtoset.app/?tv={gs.shareCode}</div>
-                <button onClick={function() { try { navigator.clipboard.writeText("https://bidtoset.app/?tv=" + gs.shareCode); } catch (_) {} }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "11px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "10px" }}>Copy link</button>
+                <div style={{ fontSize: "11px", color: GOLD, wordBreak: "break-all", marginBottom: "14px" }}>bidtoset.app/?tv={gs.shortCode || gs.shareCode}</div>
+                <button onClick={function() { try { navigator.clipboard.writeText("https://bidtoset.app/?tv=" + (gs.shortCode || gs.shareCode)); } catch (_) {} }} style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "11px 20px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", marginRight: "10px" }}>Copy link</button>
                 <button onClick={function() { setShowCast(false); }} style={{ background: "transparent", color: "#7a8a9a", border: "none", fontSize: "12px", textDecoration: "underline", cursor: "pointer" }}>Close</button>
               </div>
             ) : (
