@@ -2515,19 +2515,33 @@ function TVScoreboard({ code }) {
     if (!rt) return <div key={i} style={{ flex: 1, maxWidth: "42vw" }} />;
     var set = !!rt.wasSet;
     var pts = rt.pts || 0;
+    var players = rt.players || [];
     return (
       <div key={i} style={{ flex: 1, maxWidth: "42vw", minWidth: 0, textAlign: "center",
-        background: set ? "rgba(232,148,58,0.08)" : "rgba(109,191,142,0.05)",
-        border: "0.25vh solid " + (set ? "rgba(232,148,58,0.5)" : "rgba(109,191,142,0.4)"),
-        borderRadius: "1.4vh", padding: "1.1vh 1.4vw" }}>
-        <div style={{ fontSize: "2.3vh", fontWeight: "bold", color: set ? ORANGE : GOLD, marginBottom: "0.7vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rt.name}{set ? " SET" : ""}</div>
-        {(rt.lines || []).map(function(l, li) {
-          var bad = l.indexOf("SET") !== -1 || l.indexOf("failed") !== -1 || l.indexOf("Bag penalty") !== -1;
-          var blind = l.indexOf("Blind") !== -1;
-          return <div key={li} style={{ fontSize: "2.1vh", color: bad ? ORANGE : (blind ? BLUE : GREEN), marginBottom: "0.25vh", fontFamily: "Arial, sans-serif" }}>{l}</div>;
+        background: set ? "rgba(232,148,58,0.07)" : "rgba(255,255,255,0.02)",
+        border: "0.2vh solid " + (set ? "rgba(232,148,58,0.25)" : "rgba(255,255,255,0.06)"),
+        borderRadius: "1.2vh", padding: "1.2vh 1.4vw" }}>
+        <div style={{ fontSize: "2.5vh", fontWeight: "bold", color: set ? ORANGE : GOLD, marginBottom: "0.7vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {rt.name}{set ? " (SET)" : ""}
+        </div>
+        {players.map(function(pl, pi) {
+          var col = pl.nil === 2 ? BLUE : (pl.nil === 1 ? GOLD : "#b0c4d8");
+          var what = pl.nil === 2 ? "Blind Nil" : (pl.nil === 1 ? "Nil" : ("bid " + (pl.bid == null ? 0 : pl.bid)));
+          return (
+            <div key={pi} style={{ fontSize: "2.1vh", color: col, fontFamily: "Arial, sans-serif", lineHeight: 1.45, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {pl.name + ": " + what + " - " + pl.tricks + " tricks" + (pl.nilFailed ? "  \u274C NIL FAILED" : "")}
+            </div>
+          );
         })}
-        <div style={{ fontSize: "4.4vh", fontWeight: "bold", lineHeight: 1, color: pts >= 0 ? GREEN : RED, marginTop: "0.7vh" }}>{(pts >= 0 ? "+" : "") + pts}</div>
-        <div style={{ fontSize: "2vh", color: "#c0d0e0", marginTop: "0.6vh", fontFamily: "Arial, sans-serif" }}>{"Running: " + (rt.running || 0)}</div>
+        {!rt.bothNil ? <div style={{ fontSize: "2.1vh", color: "#a0b8c8", fontFamily: "Arial, sans-serif", lineHeight: 1.45 }}>{"Team bid: " + (rt.bid || 0)}</div> : null}
+        {(rt.lines || []).filter(function(l) { return l.indexOf("Bag penalty") !== 0; }).map(function(l, li) {
+          var bad = l.indexOf("SET") !== -1 || l.indexOf("failed") !== -1;
+          var blind = l.indexOf("Blind") !== -1;
+          return <div key={li} style={{ fontSize: "2.1vh", color: bad ? ORANGE : (blind ? BLUE : GREEN), fontFamily: "Arial, sans-serif", lineHeight: 1.45 }}>{l}</div>;
+        })}
+        <div style={{ fontSize: "4.4vh", fontWeight: "bold", lineHeight: 1.1, color: pts >= 0 ? GREEN : RED, marginTop: "0.7vh" }}>{(pts >= 0 ? "+" : "") + pts + " pts"}</div>
+        {rt.bagPenalty ? <div style={{ fontSize: "1.9vh", fontWeight: "bold", color: RED, fontFamily: "Arial, sans-serif" }}>{"BAG PENALTY " + rt.bagPenalty}</div> : null}
+        <div style={{ fontSize: "2vh", color: "#d0e0f0", fontFamily: "Arial, sans-serif", marginTop: "0.3vh" }}>{"Score: " + (rt.running || 0)}</div>
       </div>
     );
   }
