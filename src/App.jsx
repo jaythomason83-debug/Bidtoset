@@ -3417,7 +3417,7 @@ export default function App() {
                       <div style={{ fontSize: "11px", color: "#7a9ab8", letterSpacing: "1px", textTransform: "uppercase" }}>Team {ti + 1}</div>
                       <input
                         type="text"
-                        placeholder={"e.g. " + (ti === 0 ? "Debbie and Jay" : "Robbie and Shannon")}
+                        placeholder={"e.g. " + (ti === 0 ? "Debbie and Jay" : "Donna and Kevin")}
                         value={setupTeamNames[ti] || ""}
                         onChange={function(ev) {
                           const v = ev.target.value;
