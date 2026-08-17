@@ -2154,6 +2154,27 @@ function parseTvCode() {
   try { return new URLSearchParams(window.location.search).get("tv") || null; } catch (_) { return null; }
 }
 
+// Bags progress toward the penalty, as discrete pips so the room can COUNT how
+// many bags are left before it bites. Falls back to a bar for unusual bag limits.
+function bagPips(bags, limit) {
+  var n = (limit > 0) ? limit : 10;
+  var filled = Math.max(0, Math.min(n, bags || 0));
+  var hot = filled >= n - 1, warm = !hot && filled >= n - 3;
+  var col = hot ? "#e0605c" : (warm ? "#e8943a" : "rgba(200,168,78,0.85)");
+  if (n > 15) {
+    return (
+      <div style={{ height: "0.9vh", width: "70%", margin: "0.9vh auto 0", background: "rgba(255,255,255,0.10)", borderRadius: "99px", overflow: "hidden" }}>
+        <div style={{ width: ((filled / n) * 100) + "%", height: "100%", background: col, borderRadius: "99px", transition: "width 0.4s ease, background 0.4s ease" }} />
+      </div>
+    );
+  }
+  var pips = [];
+  for (var i = 0; i < n; i++) {
+    pips.push(<span key={i} style={{ width: "1.7vh", height: "1.7vh", borderRadius: "50%", background: i < filled ? col : "rgba(255,255,255,0.12)", boxShadow: (i < filled && hot) ? "0 0 1.6vh rgba(224,96,92,0.8)" : "none", transition: "background 0.4s ease" }} />);
+  }
+  return <div style={{ display: "flex", justifyContent: "center", gap: "1vh", marginTop: "1.2vh" }}>{pips}</div>;
+}
+
 function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
   const [waiting, setWaiting] = React.useState(true);
@@ -2234,6 +2255,8 @@ function TVScoreboard({ code }) {
   var done = d && d.status === "completed";
   var win = d ? d.winningTeam : null;
   var strip = d && d.strip;
+  var ev = d && d.event;
+  var bagLimit = (d && d.bagLimit) ? d.bagLimit : 10;
   function panel(i) {
     var t = (d && d.teams && d.teams[i]) ? d.teams[i] : { name: "—", score: 0, bags: 0, pct: 0, toGo: null, danger: 0 };
     var isWin = win === i;
@@ -2248,13 +2271,43 @@ function TVScoreboard({ code }) {
           <div style={{ width: fillPct + "%", height: "100%", background: fillColor, borderRadius: "99px", transition: "width 0.5s ease" }} />
         </div>
         <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
-        <div style={{ fontSize: "2.1vh", color: "#8aaabb", marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{t.bags ? (t.bags + " bag" + (t.bags === 1 ? "" : "s")) : " "}</div>
+        <div style={{ fontSize: "2.1vh", color: (t.bags >= bagLimit - 1) ? "#e0605c" : ((t.bags >= bagLimit - 3) ? "#e8943a" : "#8aaabb"), marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{(t.bags || 0) + " / " + bagLimit + " bags"}</div>
+        {bagPips(t.bags || 0, bagLimit)}
       </div>
     );
   }
   function stripItem(label, value, first) {
     return (
       <span style={{ padding: "0 1.6vw", borderLeft: first ? "none" : "1px solid rgba(255,255,255,0.12)" }}><span style={{ color: "#c8a84e" }}>{label}</span> · {value}</span>
+    );
+  }
+  // Persistent round summary. Mirrors the panel flex geometry above (incl. a
+  // hidden "vs" spacer) so each team's result sits directly under its score.
+  function summaryCell(rt, i) {
+    if (!rt) return <div key={i} style={{ flex: 1, maxWidth: "42vw" }} />;
+    var dv = rt.delta || 0;
+    var dcol = dv > 0 ? "#6dbf8e" : (dv < 0 ? "#e0605c" : "#8aaabb");
+    // Event chips live inside the team's own column — a centred row of chips
+    // reads as unattributed when every event belongs to one side.
+    var chips = (ev && ev.events) ? ev.events.filter(function(e2) { return e2.team === i; }).slice(0, 3) : [];
+    return (
+      <div key={i} style={{ flex: 1, maxWidth: "42vw", minWidth: 0, textAlign: "center" }}>
+        <div style={{ fontSize: "2.3vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", letterSpacing: "0.04vw" }}>{"bid " + (rt.bid || 0) + " · took " + (rt.tricks || 0)}</div>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: "1.4vw", marginTop: "0.5vh" }}>
+          <span style={{ fontSize: "5.6vh", fontWeight: "bold", lineHeight: 1, color: dcol }}>{(dv > 0 ? "+" : "") + dv}</span>
+          {rt.set ? <span style={{ fontSize: "2.4vh", fontWeight: "bold", color: "#e0605c", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>set</span> : null}
+          {rt.made ? <span style={{ fontSize: "2.4vh", fontWeight: "bold", color: "#6dbf8e", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>made</span> : null}
+        </div>
+        {(rt.nils && rt.nils.length) ? <div style={{ fontSize: "2vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "0.5vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rt.nils.map(function(nl) { return nl.name + " " + (nl.blind ? "blind nil " : "nil ") + (nl.made ? "nailed" : "busted"); }).join(" · ")}</div> : null}
+        {chips.length ? <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "0.8vw", marginTop: "1.1vh" }}>{chips.map(evChip)}</div> : null}
+      </div>
+    );
+  }
+  function evChip(e2, k) {
+    var bust = /BUSTED|SET/.test(e2.headline || "");
+    var c = bust ? "#e0605c" : (e2.type === "bag" ? "#e8943a" : "#c8a84e");
+    return (
+      <span key={k} style={{ border: "0.2vh solid " + c, color: c, borderRadius: "99px", padding: "0.45vh 1.5vw", fontSize: "1.95vh", fontVariant: "small-caps", letterSpacing: "0.16vw", whiteSpace: "nowrap" }}>{e2.headline}</span>
     );
   }
   return (
@@ -2265,7 +2318,7 @@ function TVScoreboard({ code }) {
         <span style={{ color: "#8aaabb" }}>{waiting ? "· waiting for game…" : (done ? "· Final" : ("· Round " + (d.round || 0)))}</span>
         {!done && !waiting && <span style={{ color: "#6dbf8e", fontSize: "2vh", letterSpacing: "0.2vw", fontFamily: "Arial, sans-serif" }}><span style={{ display: "inline-block", width: "1.4vh", height: "1.4vh", borderRadius: "50%", background: "#6dbf8e", marginRight: "0.6vw" }} />LIVE</span>}
       </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative" }}>
+      <div style={{ flex: "1.5 1 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative", minHeight: 0 }}>
         {panel(0)}
         <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
         {panel(1)}
@@ -2274,6 +2327,20 @@ function TVScoreboard({ code }) {
             <div style={{ fontSize: "5.4vh", lineHeight: 1.05, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{"♠ " + banner.headline}</div>
             <div style={{ fontSize: "2.6vh", fontFamily: "Arial, sans-serif", letterSpacing: "0.06vw", marginTop: "0.6vh" }}>{banner.sub}</div>
           </div>
+        )}
+      </div>
+      <div style={{ flex: "1 1 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 0, overflow: "hidden", borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "1.4vh", paddingTop: "1.6vh" }}>
+        {(ev && ev.teams) ? (
+          <div style={{ width: "100%" }}>
+            <div style={{ textAlign: "center", fontSize: "2.3vh", color: "#c8a84e", opacity: 0.8, fontVariant: "small-caps", letterSpacing: "0.32vw", marginBottom: "1.6vh" }}>{"— Round " + ev.roundNumber + " result —"}</div>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: "3vw" }}>
+              {summaryCell(ev.teams[0], 0)}
+              <div style={{ fontSize: "3.4vh", visibility: "hidden" }}>vs</div>
+              {summaryCell(ev.teams[1], 1)}
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: "#3d4a5a", fontSize: "2.3vh", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{waiting ? "" : "Round in progress…"}</div>
         )}
       </div>
       <div style={{ textAlign: "center", fontSize: "3.6vh", color: "#c8a84e", height: "4.4vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("♠ " + d.teams[win].name + " wins") : ""}</div>
