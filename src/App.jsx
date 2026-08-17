@@ -2783,7 +2783,10 @@ export default function App() {
     if (liveTimer.current) clearTimeout(liveTimer.current);
     liveTimer.current = setTimeout(function() { lastLiveJson.current = js; cloudPushLive(cid, payload); }, 400);
     return function() { if (liveTimer.current) clearTimeout(liveTimer.current); };
-  }, [gs.entry, gs.seating, gs.activeBidSeat, gs.cloudGameId, gs.winner, gs.rounds ? gs.rounds.length : 0]);
+    // gs.bidArmed MUST be in this list. Arming the clock is a state change with
+    // no other observable effect, so without it React never re-runs the writer
+    // and the countdown does not start until the first digit is typed.
+  }, [gs.entry, gs.seating, gs.activeBidSeat, gs.bidArmed, gs.cloudGameId, gs.winner, gs.rounds ? gs.rounds.length : 0]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
