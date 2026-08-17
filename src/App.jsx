@@ -652,6 +652,7 @@ function newGame(prev) {
     rounds: [], lastResult: null, winner: null, showHistory: false,
     seating: { N: null, S: null, E: null, W: null, dealer: null },
     activeBidSeat: null,
+    bidArmed: false,
     lastTable: lastTable,
   };
 }
@@ -2178,7 +2179,8 @@ function broadcastLive(cloudGameId, raw) {
       });
       var declared = seatsOut.filter(function(x) { return x.nil > 0 || x.bid !== null; }).length;
       shaped = { round: raw.round, seats: seatsOut, totals: totals, declared: declared,
-                 complete: declared === 4, activeBidSeat: raw.activeBidSeat, bidStartedAt: raw.bidStartedAt };
+                 complete: declared === 4, activeBidSeat: raw.activeBidSeat,
+                 bidStartedAt: raw.bidStartedAt, armed: raw.armed !== false };
     }
     _liveChan.send({ type: "broadcast", event: "live", payload: { live: shaped, sentAt: Date.now() } });
   } catch (_) {}
@@ -2201,7 +2203,7 @@ function parseTvCode() {
 // 15 seconds per bid. The cue tones and the explosion are SYNTHESISED with Web
 // Audio (oscillators + a noise buffer) rather than shipped as audio files: no
 // licensing, no CDN, nothing to 404, and it adds ~0kb to the bundle.
-const BID_SECONDS = 15;
+const BID_SECONDS = 25;
 const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
 
 function makeBidAudio() {
@@ -2417,6 +2419,16 @@ function TVScoreboard({ code }) {
   }
   // The centre of the board: "vs" normally, the bid clock while someone is on it.
   function centerSlot() {
+    // Between hands the deck is being shuffled and dealt — say so rather than
+    // showing a clock nobody is racing yet.
+    if (!done && live && live.armed === false) {
+      return (
+        <div style={{ flex: "0 0 auto", width: "17vh", textAlign: "center" }}>
+          <div style={{ fontSize: "3.6vh", color: "#4a5a6a" }}>♠</div>
+          <div style={{ fontSize: "1.9vh", color: "#5a6a7a", fontVariant: "small-caps", letterSpacing: "0.18vw", marginTop: "0.6vh", lineHeight: 1.25 }}>Shuffle<br />&amp; deal</div>
+        </div>
+      );
+    }
     if (!timer || done) return <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>;
     var rem = Math.max(0, timer.remaining);
     var frac = Math.max(0, Math.min(1, rem / BID_SECONDS));
@@ -2746,7 +2758,9 @@ export default function App() {
       // change key: the clock is an INACTIVITY clock, so ANY bid activity —
       // a digit typed, a nil toggled, the turn advancing — restarts it. What
       // runs it down is nobody doing anything.
+      var armed = !!gs.bidArmed;
       var core = {
+        armed: armed,
         round: (gs.rounds ? gs.rounds.length : 0) + 1,
         dealerSeat: seatOf(seating[seating.dealer]),
         activeBidSeat: activeSeat,
@@ -2758,7 +2772,7 @@ export default function App() {
         bidClockKey.current = coreKey;
         bidClockAt.current = Date.now();
       }
-      payload = Object.assign({}, core, { bidStartedAt: activeSeat === null ? null : bidClockAt.current });
+      payload = Object.assign({}, core, { bidStartedAt: (!armed || activeSeat === null) ? null : bidClockAt.current });
     }
     var js = payload ? bidClockKey.current : "null";
     if (js === lastLiveJson.current) return;
@@ -2936,6 +2950,9 @@ export default function App() {
         winner: winner,
         seating: (_continue && _nextDealer) ? Object.assign({}, s.seating, { dealer: _nextDealer }) : s.seating,
         activeBidSeat: (_continue && _nextDealer) ? getBidOrder(_nextDealer)[0] : s.activeBidSeat,
+        // The next hand still has to be shuffled and dealt. Nothing is on the
+        // clock until the scorekeeper says the cards are out.
+        bidArmed: false,
       });
     });
   }
@@ -2966,6 +2983,7 @@ export default function App() {
         entry: lastRound.entry,
         lastResult: null,
         winner: null,
+        bidArmed: false,
       });
     });
   }
@@ -3066,6 +3084,7 @@ export default function App() {
       return Object.assign({}, s, {
         seating: setupSeating,
         activeBidSeat: getBidOrder(setupSeating.dealer)[0],
+        bidArmed: false,
         gameId: gid,           // stable id -> dedupes re-saves (local + cloud)
         cloudGameId: cloudId,  // client-owned UUID -> live cloud writes reference it
         shareCode: share,      // mint at start so the game is shareable/castable live
@@ -3198,6 +3217,19 @@ export default function App() {
                   <span style={{ fontSize: "10px", color: BLUE }}>BLIND NIL = +/-200</span>
                 </div>
               </div>
+
+              {/* The bid clock must not run while the deck is being shuffled and
+                  dealt. Nothing is on the clock until the scorekeeper confirms
+                  the cards are out. */}
+              {gs.seating && gs.seating.dealer && !gs.bidArmed && (
+                <button onClick={function() { upd(function(st) { return Object.assign({}, st, { bidArmed: true }); }); focusBid(gs.activeBidSeat); }}
+                  style={{ width: "100%", background: "linear-gradient(160deg,rgba(200,168,78,0.22),rgba(200,168,78,0.08))", color: GOLD, border: "1px solid " + GOLD, borderRadius: "12px", padding: "14px", fontSize: "15px", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer" }}>
+                  ♠ CARDS ARE DEALT — START BIDDING
+                  <div style={{ fontSize: "10px", color: "#c8d8e8", fontWeight: "normal", letterSpacing: "0.5px", marginTop: "4px" }}>
+                    Starts the {BID_SECONDS}s clock on {(gs.seating && gs.activeBidSeat) ? gs.seating[gs.activeBidSeat] : "the first bidder"}
+                  </div>
+                </button>
+              )}
 
               {gs.teams.map(function(team, ti) {
                 return (
