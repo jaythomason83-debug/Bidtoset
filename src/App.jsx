@@ -2150,6 +2150,39 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
 // Ephemeral by design — overwritten on every (debounced) change and cleared when
 // the game ends. rounds/round_players stay the source of truth for history, so a
 // dropped write here costs nothing: the next one self-heals it.
+// Instant path to the TV. Shapes the payload into the same structure the edge
+// function returns, so the scoreboard renders identically whether the state
+// arrived by broadcast (~40ms) or by the 2s poll.
+let _liveChan = null, _liveChanId = null;
+function broadcastLive(cloudGameId, raw) {
+  try {
+    if (!cloudGameId) return;
+    if (_liveChanId !== cloudGameId) {
+      if (_liveChan) { try { supabase.removeChannel(_liveChan); } catch (_) {} }
+      _liveChan = supabase.channel("live:" + cloudGameId);
+      _liveChan.subscribe();
+      _liveChanId = cloudGameId;
+    }
+    var shaped = null;
+    if (raw) {
+      var seatsOut = [0, 1, 2, 3].map(function(seat) {
+        var b = raw.bids ? raw.bids[seat] : null;
+        var n = raw.nils ? (raw.nils[seat] || 0) : 0;
+        return { seat: seat, team: seat % 2, name: (raw.names || [])[seat] || ("Seat " + seat),
+                 bid: (b === undefined) ? null : b, nil: n,
+                 dealer: raw.dealerSeat === seat, active: raw.activeBidSeat === seat };
+      });
+      var totals = [0, 1].map(function(t) {
+        return seatsOut.filter(function(x) { return x.team === t; })
+          .reduce(function(a, x) { return a + (x.nil > 0 ? 0 : (x.bid || 0)); }, 0);
+      });
+      var declared = seatsOut.filter(function(x) { return x.nil > 0 || x.bid !== null; }).length;
+      shaped = { round: raw.round, seats: seatsOut, totals: totals, declared: declared,
+                 complete: declared === 4, activeBidSeat: raw.activeBidSeat, bidStartedAt: raw.bidStartedAt };
+    }
+    _liveChan.send({ type: "broadcast", event: "live", payload: { live: shaped, sentAt: Date.now() } });
+  } catch (_) {}
+}
 async function cloudPushLive(cloudGameId, live) {
   try {
     if (!cloudGameId) return;
@@ -2162,6 +2195,62 @@ async function cloudDeleteRound(cloudGameId, roundNumber) {
 
 function parseTvCode() {
   try { return new URLSearchParams(window.location.search).get("tv") || null; } catch (_) { return null; }
+}
+
+// ── Bid clock ────────────────────────────────────────────────────────────────
+// 15 seconds per bid. The cue tones and the explosion are SYNTHESISED with Web
+// Audio (oscillators + a noise buffer) rather than shipped as audio files: no
+// licensing, no CDN, nothing to 404, and it adds ~0kb to the bundle.
+const BID_SECONDS = 15;
+const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
+
+function makeBidAudio() {
+  try {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    var ctx = new Ctx();
+    function tick(freq) {
+      var t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "triangle";
+      o.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t); o.stop(t + 0.22);
+    }
+    function boom() {
+      var t = ctx.currentTime, dur = 1.5;
+      // Body: white noise shaped by a fast decay, pushed through a lowpass that
+      // sweeps down — the standard recipe for a convincing explosion.
+      var len = Math.floor(ctx.sampleRate * dur);
+      var buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      var chd = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) {
+        var k = 1 - i / len;
+        chd[i] = (Math.random() * 2 - 1) * k * k;
+      }
+      var src = ctx.createBufferSource(); src.buffer = buf;
+      var lp = ctx.createBiquadFilter(); lp.type = "lowpass";
+      lp.frequency.setValueAtTime(2200, t);
+      lp.frequency.exponentialRampToValueAtTime(110, t + dur);
+      var ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.55, t);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+      src.start(t);
+      // Sub-bass drop for the thump you feel rather than hear.
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(150, t);
+      o.frequency.exponentialRampToValueAtTime(26, t + 0.75);
+      g.gain.setValueAtTime(0.6, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t); o.stop(t + 1.1);
+    }
+    return { ctx: ctx, tick: tick, boom: boom };
+  } catch (_) { return null; }
 }
 
 // Bags progress toward the penalty, as discrete pips so the room can COUNT how
@@ -2187,6 +2276,13 @@ function bagPips(bags, limit) {
 
 function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
+  const [liveOverride, setLiveOverride] = React.useState(null);   // instant state via Realtime
+  const [audio, setAudio] = React.useState(null);
+  const [audioAsked, setAudioAsked] = React.useState(false);
+  const [muted, setMuted] = React.useState(false);
+  const [nowTick, setNowTick] = React.useState(0);
+  const clockOffset = React.useRef(0);   // ms to add to this TV's clock to match the scorekeeper's
+  const fired = React.useRef({});
   const [waiting, setWaiting] = React.useState(true);
   const [banner, setBanner] = React.useState(null);
   const [reelIdx, setReelIdx] = React.useState(0);
@@ -2215,6 +2311,32 @@ function TVScoreboard({ code }) {
     var iv = setInterval(tick, 2000);
     return function() { alive = false; clearInterval(iv); if (bannerTimer.current) clearTimeout(bannerTimer.current); };
   }, []);
+  // Drive the countdown locally. 10fps is plenty for a draining bar and is far
+  // kinder to a TV browser than requestAnimationFrame.
+  React.useEffect(function() {
+    var iv = setInterval(function() { setNowTick(Date.now()); }, 100);
+    return function() { clearInterval(iv); };
+  }, []);
+
+  // Realtime broadcast. Polling every 2s cannot arbitrate a 15s countdown: a bid
+  // entered at 13.5s could land after the TV already fired the explosion. The
+  // scorekeeper broadcasts each change and it arrives in well under 100ms, so the
+  // reset always beats the zero-crossing. The 2s poll stays as the fallback that
+  // seeds state for a TV joining mid-round.
+  var gameId = d && d.gameId;
+  React.useEffect(function() {
+    if (!gameId) return;
+    var ch = supabase.channel("live:" + gameId);
+    ch.on("broadcast", { event: "live" }, function(msg) {
+      var p = msg && msg.payload;
+      if (!p) return;
+      if (p.sentAt) clockOffset.current = p.sentAt - Date.now();
+      setLiveOverride(p.live || null);
+    });
+    ch.subscribe();
+    return function() { try { supabase.removeChannel(ch); } catch (_) {} };
+  }, [gameId]);
+
   var reelLen = (d && d.mode === "recap" && d.highlights) ? d.highlights.length : 0;
   React.useEffect(function() {
     if (reelLen <= 1) return;
@@ -2266,7 +2388,58 @@ function TVScoreboard({ code }) {
   var win = d ? d.winningTeam : null;
   var strip = d && d.strip;
   var ev = d && d.event;
-  var live = (d && d.live && d.live.seats) ? d.live : null;
+  // Realtime wins when present (sub-100ms); the 2s poll seeds a TV joining late.
+  var live = liveOverride || ((d && d.live && d.live.seats) ? d.live : null);
+  var timer = null;
+  if (live && live.bidStartedAt && live.activeBidSeat !== null && live.activeBidSeat !== undefined) {
+    var elapsedMs = (Date.now() + clockOffset.current) - live.bidStartedAt;
+    timer = { remaining: BID_SECONDS - (elapsedMs / 1000), key: live.activeBidSeat + ":" + live.bidStartedAt };
+  }
+  // Cue tones on each of the last 5 seconds, explosion at zero. Keyed on
+  // seat+start so a new bidder rearms everything, and the boom only fires if we
+  // actually watched the clock run down — never on a stale state after a reload.
+  React.useEffect(function() {
+    if (!audio || muted || !timer) return;
+    if (fired.current.key !== timer.key) fired.current = { key: timer.key };
+    var f = fired.current;
+    if (timer.remaining > 0) {
+      f.sawRunning = true;
+      var secs = Math.ceil(timer.remaining);
+      if (secs <= 5 && !f["t" + secs]) { f["t" + secs] = true; audio.tick(TICK_HZ[secs] || 440); }
+    } else if (f.sawRunning && !f.boom) {
+      f.boom = true; audio.boom();
+    }
+  }, [nowTick, audio, muted, timer ? timer.key : null]);
+  function enableAudio() {
+    var a = makeBidAudio();
+    if (a) { try { a.ctx.resume(); a.tick(880); } catch (_) {} setAudio(a); }
+    setAudioAsked(true);
+  }
+  // The centre of the board: "vs" normally, the bid clock while someone is on it.
+  function centerSlot() {
+    if (!timer || done) return <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>;
+    var rem = Math.max(0, timer.remaining);
+    var frac = Math.max(0, Math.min(1, rem / BID_SECONDS));
+    var expired = timer.remaining <= 0;
+    var col = expired ? RED : (rem <= 5 ? ORANGE : GOLD);
+    var R = 44, C = 2 * Math.PI * R;
+    var who = null;
+    if (live && live.seats) { var a2 = live.seats.filter(function(x) { return x.active; })[0]; who = a2 ? a2.name : null; }
+    return (
+      <div style={{ flex: "0 0 auto", position: "relative", width: "17vh", height: "17vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <svg viewBox="0 0 100 100" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", transform: "rotate(-90deg)", filter: expired ? "drop-shadow(0 0 1.4vh rgba(224,96,92,0.85))" : "none" }}>
+          <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,255,255,0.09)" strokeWidth="8" />
+          <circle cx="50" cy="50" r={R} fill="none" stroke={col} strokeWidth="8" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (1 - frac)}
+            style={{ transition: "stroke 0.25s ease" }} />
+        </svg>
+        <div style={{ textAlign: "center", zIndex: 1, lineHeight: 1 }}>
+          <div style={{ fontSize: "6.4vh", fontWeight: "bold", color: col }}>{expired ? "0" : Math.ceil(rem)}</div>
+          {who ? <div style={{ fontSize: "1.7vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "0.6vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "16vh" }}>{who}</div> : null}
+        </div>
+      </div>
+    );
+  }
   var bagLimit = (d && d.bagLimit) ? d.bagLimit : 10;
   // ── Live bid strip: each player's bid as the scorekeeper enters it ────────
   function bidCell(s, k) {
@@ -2348,6 +2521,30 @@ function TVScoreboard({ code }) {
   }
   return (
     <div style={container}>
+      {/* Browsers block audio until the page is interacted with, and a cast TV is
+          opened from a URL with no interaction — so the first cue would be
+          silently swallowed. This gate is the required first tap. */}
+      {!audioAsked && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(6,9,20,0.95)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 6vw" }}>
+          <div style={{ fontSize: "6vh", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.4vw" }}>♠ Enable the bid clock</div>
+          <div style={{ fontSize: "2.5vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2vh", maxWidth: "60vw" }}>
+            The 15-second bid clock plays a countdown cue and a buzzer. Your TV will not play sound until you tap.
+          </div>
+          <div style={{ display: "flex", gap: "2vw", marginTop: "5vh" }}>
+            <button onClick={enableAudio} style={{ background: "#c8a84e", color: "#0a0e1b", border: "none", borderRadius: "1.2vh", padding: "2vh 4vw", fontSize: "2.8vh", fontWeight: "bold", cursor: "pointer", fontFamily: "Georgia, serif" }}>Turn sound on</button>
+            <button onClick={function() { setAudioAsked(true); }} style={{ background: "transparent", color: "#8aaabb", border: "0.25vh solid rgba(255,255,255,0.25)", borderRadius: "1.2vh", padding: "2vh 4vw", fontSize: "2.8vh", cursor: "pointer", fontFamily: "Georgia, serif" }}>Silent</button>
+          </div>
+        </div>
+      )}
+      {/* Mute has to be reachable without a keyboard — a cast device usually only
+          has a pointer or a remote. ~13 buzzers a game makes this mandatory. */}
+      {audioAsked && (
+        <div onClick={function() { if (!audio) { enableAudio(); } else { setMuted(!muted); } }}
+          style={{ position: "absolute", top: "2vh", right: "2vw", zIndex: 99999, cursor: "pointer", fontSize: "2.6vh", color: (audio && !muted) ? "#c8a84e" : "#3d4a5a", border: "0.2vh solid " + ((audio && !muted) ? "rgba(200,168,78,0.4)" : "rgba(255,255,255,0.12)"), borderRadius: "50%", width: "5.2vh", height: "5.2vh", display: "flex", alignItems: "center", justifyContent: "center" }}
+          title={(audio && !muted) ? "Sound on" : "Sound off"}>
+          {(audio && !muted) ? "🔊" : "🔇"}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
         ♠ BidToSet
         {d && !waiting && <span style={{ color: "#8aaabb" }}>{"· Target " + (d.winScore || 0)}</span>}
@@ -2356,7 +2553,7 @@ function TVScoreboard({ code }) {
       </div>
       <div style={{ flex: "1.25 1 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative", minHeight: 0 }}>
         {panel(0)}
-        <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
+        {centerSlot()}
         {panel(1)}
         {banner && !done && (
           <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", background: "#c8a84e", color: "#2a1e04", padding: "2vh 4vw", borderRadius: "99px", textAlign: "center", boxShadow: "0 0 9vh rgba(200,168,78,0.55)", maxWidth: "84vw" }}>
@@ -2519,9 +2716,15 @@ export default function App() {
   // (React re-renders far more often than the bid state does).
   const liveTimer = useRef(null);
   const lastLiveJson = useRef("");
+  const bidClockKey = useRef(null);
+  const bidClockAt = useRef(0);
+  // A brand-new round must start the clock fresh, never inherit the last stamp.
+  const lastRoundSeen = useRef(-1);
   useEffect(function() {
     if (tvCode || recapCode || claim) return;   // display routes must never write
     if (!gs.cloudGameId) return;
+    var rn = gs.rounds ? gs.rounds.length : 0;
+    if (lastRoundSeen.current !== rn) { lastRoundSeen.current = rn; bidClockKey.current = null; }
     var payload = null;   // null clears live_state — used once the game is won
     if (gs.winner === null && gs.seating && gs.seating.dealer && gs.teams && gs.teams.length === 2) {
       var seating = gs.seating;
@@ -2538,17 +2741,31 @@ export default function App() {
         nils[x[2]] = nil;
         bids[x[2]] = (nil > 0 || raw === "" || raw === null || raw === undefined) ? null : (parseInt(raw) || 0);
       });
-      payload = {
+      var activeSeat = gs.activeBidSeat ? seatOf(seating[gs.activeBidSeat]) : null;
+      // Everything the TV needs, minus the clock stamp. This doubles as the
+      // change key: the clock is an INACTIVITY clock, so ANY bid activity —
+      // a digit typed, a nil toggled, the turn advancing — restarts it. What
+      // runs it down is nobody doing anything.
+      var core = {
         round: (gs.rounds ? gs.rounds.length : 0) + 1,
         dealerSeat: seatOf(seating[seating.dealer]),
-        activeBidSeat: gs.activeBidSeat ? seatOf(seating[gs.activeBidSeat]) : null,
+        activeBidSeat: activeSeat,
         names: [gs.teams[0].p[0], gs.teams[1].p[0], gs.teams[0].p[1], gs.teams[1].p[1]],
         bids: bids, nils: nils,
       };
+      var coreKey = JSON.stringify(core);
+      if (bidClockKey.current !== coreKey) {
+        bidClockKey.current = coreKey;
+        bidClockAt.current = Date.now();
+      }
+      payload = Object.assign({}, core, { bidStartedAt: activeSeat === null ? null : bidClockAt.current });
     }
-    var js = JSON.stringify(payload);
+    var js = payload ? bidClockKey.current : "null";
     if (js === lastLiveJson.current) return;
     var cid = gs.cloudGameId;
+    // Broadcast is NOT debounced. A 400ms delay on a 15s clock reset is exactly
+    // the lag that makes the TV buzz someone who bid on time.
+    broadcastLive(cid, payload);
     if (liveTimer.current) clearTimeout(liveTimer.current);
     liveTimer.current = setTimeout(function() { lastLiveJson.current = js; cloudPushLive(cid, payload); }, 400);
     return function() { if (liveTimer.current) clearTimeout(liveTimer.current); };
