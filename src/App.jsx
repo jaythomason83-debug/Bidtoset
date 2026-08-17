@@ -2146,6 +2146,16 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
     await supabase.from("games").update({ total_rounds: round.num }).eq("id", cloudGameId);
   } catch (_) {}
 }
+// Live in-round state for the TV: bids as they're entered, dealer, active seat.
+// Ephemeral by design — overwritten on every (debounced) change and cleared when
+// the game ends. rounds/round_players stay the source of truth for history, so a
+// dropped write here costs nothing: the next one self-heals it.
+async function cloudPushLive(cloudGameId, live) {
+  try {
+    if (!cloudGameId) return;
+    await supabase.from("games").update({ live_state: live }).eq("id", cloudGameId);
+  } catch (_) {}
+}
 async function cloudDeleteRound(cloudGameId, roundNumber) {
   try { if (cloudGameId && roundNumber) { await supabase.from("rounds").delete().eq("game_id", cloudGameId).eq("round_number", roundNumber); await supabase.from("games").update({ total_rounds: roundNumber - 1 }).eq("id", cloudGameId); } } catch (_) {}
 }
@@ -2256,7 +2266,38 @@ function TVScoreboard({ code }) {
   var win = d ? d.winningTeam : null;
   var strip = d && d.strip;
   var ev = d && d.event;
+  var live = (d && d.live && d.live.seats) ? d.live : null;
   var bagLimit = (d && d.bagLimit) ? d.bagLimit : 10;
+  // ── Live bid strip: each player's bid as the scorekeeper enters it ────────
+  function bidCell(s, k) {
+    var pending = s.nil === 0 && (s.bid === null || s.bid === undefined);
+    var label = s.nil === 2 ? "BLIND" : (s.nil === 1 ? "NIL" : (pending ? "·" : String(s.bid)));
+    var col = s.nil === 2 ? BLUE : (s.nil === 1 ? ORANGE : (pending ? "#3d4a5a" : "#e6edf5"));
+    return (
+      <div key={k} style={{ flex: 1, minWidth: 0, textAlign: "center", padding: "0.5vh 0.3vw", borderRadius: "1vh",
+        background: s.active ? "rgba(200,168,78,0.13)" : "transparent",
+        border: "0.2vh solid " + (s.active ? "rgba(200,168,78,0.55)" : "transparent"), transition: "all 0.3s ease" }}>
+        <div style={{ fontSize: "1.9vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {s.name}
+          {s.dealer ? <span style={{ fontSize: "1.4vh", padding: "0.15vh 0.5vw", borderRadius: "0.5vh", background: "rgba(200,168,78,0.15)", color: GOLD, border: "0.15vh solid rgba(200,168,78,0.45)", letterSpacing: "0.08vw", marginLeft: "0.4vw" }}>DEALER</span> : null}
+        </div>
+        <div style={{ fontSize: s.nil > 0 ? "2.5vh" : "3.8vh", fontWeight: "bold", color: col, lineHeight: 1.15, marginTop: "0.2vh", letterSpacing: s.nil > 0 ? "0.1vw" : "0" }}>{label}</div>
+      </div>
+    );
+  }
+  function bidGroup(t) {
+    var ss = live.seats.filter(function(s) { return s.team === t; });
+    return (
+      <div style={{ flex: 1, maxWidth: "42vw", minWidth: 0, display: "flex", alignItems: "center", gap: "0.6vw",
+        background: "rgba(255,255,255,0.03)", border: "0.2vh solid rgba(200,168,78,0.18)", borderRadius: "1.2vh", padding: "0.7vh 1vw" }}>
+        {ss.map(bidCell)}
+        <div style={{ borderLeft: "1px solid rgba(255,255,255,0.13)", paddingLeft: "1vw", textAlign: "center", minWidth: "6.5vw" }}>
+          <div style={{ fontSize: "1.6vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", letterSpacing: "0.12vw" }}>TEAM BID</div>
+          <div style={{ fontSize: "3.8vh", fontWeight: "bold", color: GOLD, lineHeight: 1.15 }}>{live.totals[t]}</div>
+        </div>
+      </div>
+    );
+  }
   function panel(i) {
     var t = (d && d.teams && d.teams[i]) ? d.teams[i] : { name: "—", score: 0, bags: 0, pct: 0, toGo: null, danger: 0 };
     var isWin = win === i;
@@ -2264,10 +2305,10 @@ function TVScoreboard({ code }) {
     var fillPct = danger ? t.danger : (t.pct || 0);
     var fillColor = danger ? "#e0605c" : "#c8a84e";
     return (
-      <div style={{ flex: 1, maxWidth: "42vw", background: isWin ? "linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05))" : "rgba(255,255,255,0.03)", border: "0.3vh solid " + (isWin ? "#c8a84e" : "rgba(200,168,78,0.25)"), borderRadius: "2vh", padding: "3.4vh 3vw", textAlign: "center", boxShadow: isWin ? "0 0 8vh rgba(200,168,78,0.3)" : "none" }}>
-        <div style={{ fontSize: "3.6vh", color: "#c8a84e", fontWeight: "bold", marginBottom: "0.8vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-        <div style={{ fontSize: "14vh", fontWeight: "bold", lineHeight: 1, color: isWin ? "#c8a84e" : (danger ? "#e0605c" : "#e6edf5") }}>{t.score}</div>
-        <div style={{ height: "1.1vh", background: "rgba(255,255,255,0.08)", borderRadius: "99px", overflow: "hidden", margin: "2vh 0 0.9vh" }}>
+      <div style={{ flex: 1, maxWidth: "42vw", background: isWin ? "linear-gradient(160deg,rgba(200,168,78,0.16),rgba(200,168,78,0.05))" : "rgba(255,255,255,0.03)", border: "0.3vh solid " + (isWin ? "#c8a84e" : "rgba(200,168,78,0.25)"), borderRadius: "2vh", padding: "2.2vh 2.4vw", textAlign: "center", boxShadow: isWin ? "0 0 8vh rgba(200,168,78,0.3)" : "none" }}>
+        <div style={{ fontSize: "3vh", color: "#c8a84e", fontWeight: "bold", marginBottom: "0.6vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+        <div style={{ fontSize: "10.5vh", fontWeight: "bold", lineHeight: 1, color: isWin ? "#c8a84e" : (danger ? "#e0605c" : "#e6edf5") }}>{t.score}</div>
+        <div style={{ height: "1.1vh", background: "rgba(255,255,255,0.08)", borderRadius: "99px", overflow: "hidden", margin: "1.3vh 0 0.7vh" }}>
           <div style={{ width: fillPct + "%", height: "100%", background: fillColor, borderRadius: "99px", transition: "width 0.5s ease" }} />
         </div>
         <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
@@ -2281,33 +2322,28 @@ function TVScoreboard({ code }) {
       <span style={{ padding: "0 1.6vw", borderLeft: first ? "none" : "1px solid rgba(255,255,255,0.12)" }}><span style={{ color: "#c8a84e" }}>{label}</span> · {value}</span>
     );
   }
-  // Persistent round summary. Mirrors the panel flex geometry above (incl. a
-  // hidden "vs" spacer) so each team's result sits directly under its score.
+  // Round summary — a TV-scaled copy of the phone app's ResultCard. Same line
+  // wording, same colour rules, same pts (before bag penalty) and running total,
+  // so the scorekeeper's phone and the TV never disagree. Mirrors the panel flex
+  // geometry above (incl. a hidden "vs" spacer) so each card sits under its score.
   function summaryCell(rt, i) {
     if (!rt) return <div key={i} style={{ flex: 1, maxWidth: "42vw" }} />;
-    var dv = rt.delta || 0;
-    var dcol = dv > 0 ? "#6dbf8e" : (dv < 0 ? "#e0605c" : "#8aaabb");
-    // Event chips live inside the team's own column — a centred row of chips
-    // reads as unattributed when every event belongs to one side.
-    var chips = (ev && ev.events) ? ev.events.filter(function(e2) { return e2.team === i; }).slice(0, 3) : [];
+    var set = !!rt.wasSet;
+    var pts = rt.pts || 0;
     return (
-      <div key={i} style={{ flex: 1, maxWidth: "42vw", minWidth: 0, textAlign: "center" }}>
-        <div style={{ fontSize: "2.3vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", letterSpacing: "0.04vw" }}>{"bid " + (rt.bid || 0) + " · took " + (rt.tricks || 0)}</div>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: "1.4vw", marginTop: "0.5vh" }}>
-          <span style={{ fontSize: "5.6vh", fontWeight: "bold", lineHeight: 1, color: dcol }}>{(dv > 0 ? "+" : "") + dv}</span>
-          {rt.set ? <span style={{ fontSize: "2.4vh", fontWeight: "bold", color: "#e0605c", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>set</span> : null}
-          {rt.made ? <span style={{ fontSize: "2.4vh", fontWeight: "bold", color: "#6dbf8e", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>made</span> : null}
-        </div>
-        {(rt.nils && rt.nils.length) ? <div style={{ fontSize: "2vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "0.5vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rt.nils.map(function(nl) { return nl.name + " " + (nl.blind ? "blind nil " : "nil ") + (nl.made ? "nailed" : "busted"); }).join(" · ")}</div> : null}
-        {chips.length ? <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "0.8vw", marginTop: "1.1vh" }}>{chips.map(evChip)}</div> : null}
+      <div key={i} style={{ flex: 1, maxWidth: "42vw", minWidth: 0, textAlign: "center",
+        background: set ? "rgba(232,148,58,0.08)" : "rgba(109,191,142,0.05)",
+        border: "0.25vh solid " + (set ? "rgba(232,148,58,0.5)" : "rgba(109,191,142,0.4)"),
+        borderRadius: "1.4vh", padding: "1.1vh 1.4vw" }}>
+        <div style={{ fontSize: "2.3vh", fontWeight: "bold", color: set ? ORANGE : GOLD, marginBottom: "0.7vh", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rt.name}{set ? " SET" : ""}</div>
+        {(rt.lines || []).map(function(l, li) {
+          var bad = l.indexOf("SET") !== -1 || l.indexOf("failed") !== -1 || l.indexOf("Bag penalty") !== -1;
+          var blind = l.indexOf("Blind") !== -1;
+          return <div key={li} style={{ fontSize: "2.1vh", color: bad ? ORANGE : (blind ? BLUE : GREEN), marginBottom: "0.25vh", fontFamily: "Arial, sans-serif" }}>{l}</div>;
+        })}
+        <div style={{ fontSize: "4.4vh", fontWeight: "bold", lineHeight: 1, color: pts >= 0 ? GREEN : RED, marginTop: "0.7vh" }}>{(pts >= 0 ? "+" : "") + pts}</div>
+        <div style={{ fontSize: "2vh", color: "#c0d0e0", marginTop: "0.6vh", fontFamily: "Arial, sans-serif" }}>{"Running: " + (rt.running || 0)}</div>
       </div>
-    );
-  }
-  function evChip(e2, k) {
-    var bust = /BUSTED|SET/.test(e2.headline || "");
-    var c = bust ? "#e0605c" : (e2.type === "bag" ? "#e8943a" : "#c8a84e");
-    return (
-      <span key={k} style={{ border: "0.2vh solid " + c, color: c, borderRadius: "99px", padding: "0.45vh 1.5vw", fontSize: "1.95vh", fontVariant: "small-caps", letterSpacing: "0.16vw", whiteSpace: "nowrap" }}>{e2.headline}</span>
     );
   }
   return (
@@ -2318,7 +2354,7 @@ function TVScoreboard({ code }) {
         <span style={{ color: "#8aaabb" }}>{waiting ? "· waiting for game…" : (done ? "· Final" : ("· Round " + (d.round || 0)))}</span>
         {!done && !waiting && <span style={{ color: "#6dbf8e", fontSize: "2vh", letterSpacing: "0.2vw", fontFamily: "Arial, sans-serif" }}><span style={{ display: "inline-block", width: "1.4vh", height: "1.4vh", borderRadius: "50%", background: "#6dbf8e", marginRight: "0.6vw" }} />LIVE</span>}
       </div>
-      <div style={{ flex: "1.5 1 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative", minHeight: 0 }}>
+      <div style={{ flex: "1.25 1 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "3vw", position: "relative", minHeight: 0 }}>
         {panel(0)}
         <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>
         {panel(1)}
@@ -2329,11 +2365,18 @@ function TVScoreboard({ code }) {
           </div>
         )}
       </div>
+      {live && !done && (
+        <div style={{ display: "flex", alignItems: "stretch", justifyContent: "center", gap: "3vw", marginTop: "1.4vh" }}>
+          {bidGroup(0)}
+          <div style={{ fontSize: "3.4vh", visibility: "hidden" }}>vs</div>
+          {bidGroup(1)}
+        </div>
+      )}
       <div style={{ flex: "1 1 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 0, overflow: "hidden", borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "1.4vh", paddingTop: "1.6vh" }}>
         {(ev && ev.teams) ? (
           <div style={{ width: "100%" }}>
-            <div style={{ textAlign: "center", fontSize: "2.3vh", color: "#c8a84e", opacity: 0.8, fontVariant: "small-caps", letterSpacing: "0.32vw", marginBottom: "1.6vh" }}>{"— Round " + ev.roundNumber + " result —"}</div>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: "3vw" }}>
+            <div style={{ textAlign: "center", fontSize: "2.1vh", color: GREEN, letterSpacing: "0.55vw", marginBottom: "1.5vh", fontFamily: "Arial, sans-serif" }}>{"ROUND " + ev.roundNumber + " RESULT"}</div>
+            <div style={{ display: "flex", alignItems: "stretch", justifyContent: "center", gap: "3vw" }}>
               {summaryCell(ev.teams[0], 0)}
               <div style={{ fontSize: "3.4vh", visibility: "hidden" }}>vs</div>
               {summaryCell(ev.teams[1], 1)}
@@ -2471,6 +2514,45 @@ export default function App() {
       cloudDeleteRound(gs.cloudGameId, removed);
     }
   }, [gs.rounds ? gs.rounds.length : 0]);
+  // Live cloud write: push bids to the TV as they're entered. Debounced to one
+  // write per 400ms of quiet, and skipped entirely when nothing actually changed
+  // (React re-renders far more often than the bid state does).
+  const liveTimer = useRef(null);
+  const lastLiveJson = useRef("");
+  useEffect(function() {
+    if (tvCode || recapCode || claim) return;   // display routes must never write
+    if (!gs.cloudGameId) return;
+    var payload = null;   // null clears live_state — used once the game is won
+    if (gs.winner === null && gs.seating && gs.seating.dealer && gs.teams && gs.teams.length === 2) {
+      var seating = gs.seating;
+      // Seat geometry matches the rest of the app: t0p0=0, t1p0=1, t0p1=2, t1p1=3.
+      var seatByName = {};
+      seatByName[gs.teams[0].p[0]] = 0; seatByName[gs.teams[1].p[0]] = 1;
+      seatByName[gs.teams[0].p[1]] = 2; seatByName[gs.teams[1].p[1]] = 3;
+      function seatOf(nm) { return (nm && seatByName[nm] !== undefined) ? seatByName[nm] : null; }
+      var bids = {}, nils = {};
+      [[0, "p1", 0], [1, "p1", 1], [0, "p2", 2], [1, "p2", 3]].forEach(function(x) {
+        var e = (gs.entry && gs.entry[x[0]]) ? gs.entry[x[0]] : {};
+        var nil = e[x[1] + "nil"] || 0;
+        var raw = e[x[1] + "bid"];
+        nils[x[2]] = nil;
+        bids[x[2]] = (nil > 0 || raw === "" || raw === null || raw === undefined) ? null : (parseInt(raw) || 0);
+      });
+      payload = {
+        round: (gs.rounds ? gs.rounds.length : 0) + 1,
+        dealerSeat: seatOf(seating[seating.dealer]),
+        activeBidSeat: gs.activeBidSeat ? seatOf(seating[gs.activeBidSeat]) : null,
+        names: [gs.teams[0].p[0], gs.teams[1].p[0], gs.teams[0].p[1], gs.teams[1].p[1]],
+        bids: bids, nils: nils,
+      };
+    }
+    var js = JSON.stringify(payload);
+    if (js === lastLiveJson.current) return;
+    var cid = gs.cloudGameId;
+    if (liveTimer.current) clearTimeout(liveTimer.current);
+    liveTimer.current = setTimeout(function() { lastLiveJson.current = js; cloudPushLive(cid, payload); }, 400);
+    return function() { if (liveTimer.current) clearTimeout(liveTimer.current); };
+  }, [gs.entry, gs.seating, gs.activeBidSeat, gs.cloudGameId, gs.winner, gs.rounds ? gs.rounds.length : 0]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
   const [rules, setRules] = useState(loadSettings);
