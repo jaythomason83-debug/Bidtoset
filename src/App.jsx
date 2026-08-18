@@ -3286,6 +3286,15 @@ export default function App() {
   function focusBid(seat) {
     try { var el = seat ? bidRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
   }
+  // Seats in the order the four player boxes appear on screen:
+  // team0 p0, team0 p1, team1 p0, team1 p1 - top to bottom, identical every hand.
+  function getTrickOrder() {
+    if (!gs.seating || !gs.teams || gs.teams.length !== 2) return [];
+    const compass = ["N", "E", "S", "W"];
+    function seatOf(nm) { return compass.find(function(c) { return gs.seating[c] === nm; }) || null; }
+    return [seatOf(gs.teams[0].p[0]), seatOf(gs.teams[0].p[1]),
+            seatOf(gs.teams[1].p[0]), seatOf(gs.teams[1].p[1])].filter(Boolean);
+  }
   function focusTrick(seat) {
     try { var el = seat ? trickRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
   }
@@ -3302,18 +3311,19 @@ export default function App() {
     const next = idx < 3 ? order[idx + 1] : null;
     // Bidding done -> move the prompt straight into trick entry on the first seat,
     // so the scorer never has to reach for the screen between phases.
-    upd(function(s) { return Object.assign({}, s, { activeBidSeat: next, activeTrickSeat: next === null ? order[0] : s.activeTrickSeat }); });
-    if (next) focusBid(next); else focusTrick(order[0]);
+    const tOrder = getTrickOrder();
+    upd(function(s) { return Object.assign({}, s, { activeBidSeat: next, activeTrickSeat: next === null ? (tOrder[0] || null) : s.activeTrickSeat }); });
+    if (next) focusBid(next); else focusTrick(tOrder[0]);
   }
   // Tricks cadence: entering a count hands the cursor to the next seat, in the
   // same clockwise order bidding uses, so the scorer can go 1 -> 2 -> 3 -> 4
   // without touching the screen between players.
   function advanceTrickSeat(fromSeat) {
     if (!gs.seating || !gs.seating.dealer || !fromSeat) return;
-    const order = getBidOrder(gs.seating.dealer);
+    const order = getTrickOrder();
     const idx = order.indexOf(fromSeat);
     if (idx === -1) return;
-    const next = idx < order.length - 1 ? order[idx + 1] : null;   // stop at the last seat
+    const next = idx < order.length - 1 ? order[idx + 1] : null;   // stop at the last box
     upd(function(s) { return Object.assign({}, s, { activeTrickSeat: next }); });
     if (next) focusTrick(next);
   }
