@@ -1018,21 +1018,33 @@ function RenegadeIcon() {
   );
 }
 
-function MercyRuleBanner({ teams }) {
+function MercyRuleBanner({ teams, onConcede }) {
   const [msgOpen, setMsgOpen] = React.useState(false);
   if (!teams || teams.length !== 2) return null;
   const spread = Math.abs(teams[0].score - teams[1].score);
   if (spread < 200) return null;
-  const loser = teams[0].score < teams[1].score ? teams[0] : teams[1];
+  const loserIdx = teams[0].score < teams[1].score ? 0 : 1;
+  const winnerIdx = loserIdx === 0 ? 1 : 0;
+  const loser = teams[loserIdx], winner = teams[winnerIdx];
   return (
     <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "10px", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", animation: "toastIn 0.4s ease-out" }}>
       <div style={{ fontSize: "16px", cursor: "pointer" }} onClick={function(){ setMsgOpen(function(v){return !v;}); }}>🏳️</div>
-      <div style={{ fontSize: "10px", color: "#8a9aaa", letterSpacing: "1px" }}>
+      <div style={{ fontSize: "10px", color: "#8a9aaa", letterSpacing: "1px", flex: 1 }}>
         {msgOpen ? ("It's okay to quit. We won't tell Reddit.") : (loser.name + " down " + spread + " — surrender?")}
       </div>
+      {onConcede && (
+        <button
+          onClick={function(){
+            if (confirm(loser.name + " concede?\n\n" + winner.name + " take the win at " + winner.score + " - " + loser.score + ".")) onConcede(winnerIdx);
+          }}
+          style={{ flexShrink: 0, background: "rgba(224,92,92,0.18)", color: "#e05c5c", border: "1px solid rgba(224,92,92,0.55)", borderRadius: "8px", padding: "7px 12px", fontSize: "10px", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer", fontFamily: "Georgia, serif" }}>
+          CONCEDE
+        </button>
+      )}
     </div>
   );
 }
+
 
 function BagLadyWarning({ teams, bagLimit }) {
   const danger = teams.filter(function(t) { return t.bags >= (bagLimit - 1) && t.bags < bagLimit; });
@@ -2166,16 +2178,16 @@ async function cloudEnsureParticipants(cloudGameId, teams) {
 
 async function cloudPushRound(cloudGameId, teams, round, newTeams) {
   try {
-    if (!cloudGameId || !round || !round.entry || round.entry.length !== 2) return;
+    if (!cloudGameId || !round || !round.entry || round.entry.length !== 2) return false;
     const seatToPid = await cloudEnsureParticipants(cloudGameId, teams);
-    if (!seatToPid) return;
+    if (!seatToPid) return false;
     const e0 = round.entry[0], e1 = round.entry[1], res = round.results || [], pen = round.penalties || [0, 0];
     function tBid(e){ return (e.p1nil > 0 ? 0 : (parseInt(e.p1bid) || 0)) + (e.p2nil > 0 ? 0 : (parseInt(e.p2bid) || 0)); }
     function tTricks(e){ return (parseInt(e.p1tricks) || 0) + (parseInt(e.p2tricks) || 0); }
     var dealerSeat = null;
     if (round.dealer) { var ds = [ {n:teams[0].p[0],s:0},{n:teams[1].p[0],s:1},{n:teams[0].p[1],s:2},{n:teams[1].p[1],s:3} ].find(function(x){ return x.n === round.dealer; }); dealerSeat = ds ? ds.s : null; }
     const t0 = tTricks(e0), t1 = tTricks(e1);
-    if (t0 + t1 !== 13) return;
+    if (t0 + t1 !== 13) return false;
     const roundRow = {
       game_id: cloudGameId, round_number: round.num, dealer_seat: dealerSeat,
       team_0_bid: tBid(e0), team_1_bid: tBid(e1), team_0_tricks: t0, team_1_tricks: t1,
@@ -2186,7 +2198,7 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
       team_0_bag_penalty_applied: pen[0] || 0, team_1_bag_penalty_applied: pen[1] || 0,
     };
     const { data: rRow } = await supabase.from("rounds").upsert([roundRow], { onConflict: "game_id,round_number" }).select("id").single();
-    if (!rRow || !rRow.id) return;
+    if (!rRow || !rRow.id) return false;
     const roundId = rRow.id, rpRows = [];
     [0, 1].forEach(function(ti){
       const en = round.entry[ti]; if (!en) return;
@@ -2198,7 +2210,8 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
     });
     await supabase.from("round_players").upsert(rpRows, { onConflict: "round_id,seat" });
     await supabase.from("games").update({ total_rounds: round.num }).eq("id", cloudGameId);
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 // Live in-round state for the TV: bids as they're entered, dealer, active seat.
 // Ephemeral by design — overwritten on every (debounced) change and cleared when
@@ -2865,7 +2878,7 @@ export default function App() {
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current !== gs.cloudGameId && gs.teams && gs.teams.length === 2) {
       startedCloudGame.current = gs.cloudGameId;
-      lastPushedRound.current = gs.rounds ? gs.rounds.length : 0;
+      lastPushedRound.current = 0;   // re-verify every round against the cloud
       var cid = gs.cloudGameId;
       cloudStartGame(cid, gs.gameId, gs.shareCode, gs.teams, rules).then(function(sc) {
         if (sc) setGs(function(s) { return s.cloudGameId === cid ? Object.assign({}, s, { shortCode: sc }) : s; });
@@ -2877,9 +2890,18 @@ export default function App() {
     if (!gs.cloudGameId) return;
     var n = gs.rounds ? gs.rounds.length : 0;
     if (n > lastPushedRound.current) {
-      var lr = gs.rounds[n - 1];
-      lastPushedRound.current = n;
-      cloudPushRound(gs.cloudGameId, gs.teams, lr, gs.teams);
+      // Push EVERY round the cloud is missing, and only advance the marker when
+      // the write actually succeeded. Previously the marker moved first and the
+      // push was fire-and-forget, so any failure silently dropped that round from
+      // the TV score forever. Upserts are keyed on (game_id, round_number), so
+      // re-pushing is harmless and lets a reload repair a game that fell behind.
+      (async function () {
+        for (var i = lastPushedRound.current; i < n; i++) {
+          var ok = await cloudPushRound(gs.cloudGameId, gs.teams, gs.rounds[i], gs.teams);
+          if (!ok) return;
+          lastPushedRound.current = i + 1;
+        }
+      })();
     } else if (n < lastPushedRound.current) {
       var removed = lastPushedRound.current;
       lastPushedRound.current = n;
@@ -3156,6 +3178,12 @@ export default function App() {
   // Commit the game exactly once, only after the scorer confirms the final score.
   // Deferred from scoreRound so a mis-keyed deciding round can be undone first —
   // nothing was saved yet, so no duplicate history/cloud rows are possible.
+  // Conceding ends the game for real: the leader is recorded as the winner and
+  // the normal end-of-game path takes over (archive, cloud push, game closed).
+  function concedeGame(winnerIdx) {
+    if (winnerIdx !== 0 && winnerIdx !== 1) return;
+    upd(function(s) { return Object.assign({}, s, { winner: winnerIdx, conceded: true }); });
+  }
   function confirmFinalScore() {
     if (gs.winner === null || gs.archived) return;
     const shareCode = gs.shareCode || genShareCode();
@@ -3414,7 +3442,7 @@ export default function App() {
               })}
 
               <BagLadyWarning teams={gs.teams} bagLimit={rules.bagLimit} />
-              <MercyRuleBanner teams={gs.teams} />
+              <MercyRuleBanner teams={gs.teams} onConcede={concedeGame} />
 
               <button onClick={function(){ if (canScore) { scoreRound(); } else { hapticPulse([50,40,50,40,70]); setScoreShake(true); setTimeout(function(){ setScoreShake(false); }, 450); } }} disabled={false} style={{
                 background: scoreBtnBg, color: canScore ? DIM : "#c8d8e8", border: "none", borderRadius: "10px",
