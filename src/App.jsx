@@ -652,6 +652,7 @@ function newGame(prev) {
     rounds: [], lastResult: null, winner: null, showHistory: false,
     seating: { N: null, S: null, E: null, W: null, dealer: null },
     activeBidSeat: null,
+    activeTrickSeat: null,
     bidArmed: false,
     lastTable: lastTable,
   };
@@ -746,7 +747,7 @@ function EditableName({ value, onChange, style }) {
 
 // ─── Player Row ───────────────────────────────────────────────────────────────
 
-function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer, seat, bidRefs, trickRefs, onTricksComplete }) {
+function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, isTrickActive, onBidComplete, bidRef, isDealer, seat, bidRefs, trickRefs, onTricksComplete }) {
   const ns = nilBtnStyle(nilState);
   const isNil = nilState > 0;
 
@@ -789,14 +790,19 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
             if(v!=="" && wasEmpty && onTricksComplete) onTricksComplete(seat);
           }
         }}
-        style={iStyle({ borderColor: nilState === 2 ? "rgba(0,191,255,0.55)" : nilState === 1 ? "rgba(200,168,78,0.55)" : "rgba(255,255,255,0.35)", color: tricks === "" ? "#8a9aaa" : "#e8dcc8" })} />
+        style={iStyle({
+          borderColor: isTrickActive ? "#00e5ff" : (nilState === 2 ? "rgba(0,191,255,0.55)" : nilState === 1 ? "rgba(200,168,78,0.55)" : "rgba(255,255,255,0.35)"),
+          background: isTrickActive ? "rgba(0,229,255,0.18)" : "rgba(255,255,255,0.08)",
+          boxShadow: isTrickActive ? "0 0 10px rgba(0,229,255,0.5)" : "none",
+          transition: "all 0.2s",
+          color: tricks === "" ? "#8a9aaa" : "#e8dcc8" })} />
     </div>
   );
 }
 
 // ─── Team Card ────────────────────────────────────────────────────────────────
 
-function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2, seatP1, seatP2, bidRefs, trickRefs, onAdvanceTrick }) {
+function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2, seatP1, seatP2, bidRefs, trickRefs, onAdvanceTrick, trickActiveP1, trickActiveP2 }) {
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
@@ -842,8 +848,8 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
 
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }} />
 
-      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} seat={seatP1} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
-      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} seat={seatP2} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
+      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} isTrickActive={trickActiveP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} seat={seatP1} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
+      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} isTrickActive={trickActiveP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} seat={seatP2} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
 
       {warn && !setAlert && (
         <div style={{ background: RED, color: DIM, fontSize: "11px", fontWeight: "bold", textAlign: "center", padding: "9px", borderRadius: "7px", textTransform: "uppercase", letterSpacing: "1px" }}>
@@ -3162,6 +3168,7 @@ export default function App() {
         winner: winner,
         seating: (_continue && _nextDealer) ? Object.assign({}, s.seating, { dealer: _nextDealer }) : s.seating,
         activeBidSeat: (_continue && _nextDealer) ? getBidOrder(_nextDealer)[0] : s.activeBidSeat,
+        activeTrickSeat: null,
         // The next hand still has to be shuffled and dealt. Nothing is on the
         // clock until the scorekeeper says the cards are out.
         bidArmed: false,
@@ -3279,6 +3286,9 @@ export default function App() {
   function focusBid(seat) {
     try { var el = seat ? bidRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
   }
+  function focusTrick(seat) {
+    try { var el = seat ? trickRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
+  }
   function advanceBidSeat() {
     if (!gs.seating || !gs.seating.dealer) return;
     const order = getBidOrder(gs.seating.dealer);
@@ -3290,8 +3300,10 @@ export default function App() {
     }
     const idx = order.indexOf(cur);
     const next = idx < 3 ? order[idx + 1] : null;
-    upd(function(s) { return Object.assign({}, s, { activeBidSeat: next }); });
-    focusBid(next);
+    // Bidding done -> move the prompt straight into trick entry on the first seat,
+    // so the scorer never has to reach for the screen between phases.
+    upd(function(s) { return Object.assign({}, s, { activeBidSeat: next, activeTrickSeat: next === null ? order[0] : s.activeTrickSeat }); });
+    if (next) focusBid(next); else focusTrick(order[0]);
   }
   // Tricks cadence: entering a count hands the cursor to the next seat, in the
   // same clockwise order bidding uses, so the scorer can go 1 -> 2 -> 3 -> 4
@@ -3300,12 +3312,10 @@ export default function App() {
     if (!gs.seating || !gs.seating.dealer || !fromSeat) return;
     const order = getBidOrder(gs.seating.dealer);
     const idx = order.indexOf(fromSeat);
-    if (idx === -1 || idx >= order.length - 1) return;   // last seat: stop, do not wrap
-    const next = order[idx + 1];
-    try {
-      const el = trickRefs.current[next];
-      if (el && el.focus) { el.focus(); if (el.select) el.select(); }
-    } catch (_) {}
+    if (idx === -1) return;
+    const next = idx < order.length - 1 ? order[idx + 1] : null;   // stop at the last seat
+    upd(function(s) { return Object.assign({}, s, { activeTrickSeat: next }); });
+    if (next) focusTrick(next);
   }
   function startRoundBidding() {
     if (!gs.seating || !gs.seating.dealer) return;
@@ -3320,6 +3330,7 @@ export default function App() {
       return Object.assign({}, s, {
         seating: setupSeating,
         activeBidSeat: getBidOrder(setupSeating.dealer)[0],
+        activeTrickSeat: null,
         bidArmed: false,
         gameId: gid,           // stable id -> dedupes re-saves (local + cloud)
         cloudGameId: cloudId,  // client-owned UUID -> live cloud writes reference it
@@ -3470,8 +3481,8 @@ export default function App() {
               {gs.teams.map(function(team, ti) {
                 return (
                   <TeamCard key={ti + team.name + team.p[0] + team.p[1]} team={team} ti={ti} entry={gs.entry}
-                    activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false} isDealerP1={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[0] : false}
-                    activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false} isDealerP2={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[1] : false}
+                    activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false} trickActiveP1={gs.activeTrickSeat && gs.seating ? gs.seating[gs.activeTrickSeat] === team.p[0] : false} isDealerP1={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[0] : false}
+                    activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false} trickActiveP2={gs.activeTrickSeat && gs.seating ? gs.seating[gs.activeTrickSeat] === team.p[1] : false} isDealerP2={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[1] : false}
                     onAdvanceBid={advanceBidSeat} trickRefs={trickRefs} onAdvanceTrick={advanceTrickSeat} seatP1={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[0]; }) || null) : null} seatP2={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[1]; }) || null) : null} bidRefs={bidRefs}
                     onToggleNil={toggleNil} onField={setField}
                     onTeamName={function(v) { setTeamName(ti, v); }}
