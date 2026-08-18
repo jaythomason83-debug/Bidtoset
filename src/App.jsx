@@ -2088,14 +2088,10 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams, rules) {
       { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
     ];
     if (seatDefs.some(function(x){ return !x.name; })) return shortCode;
-    const uniq = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
+    const uniq = Array.from(new Set(seatDefs.map(function(x){ return String(x.name).toLowerCase(); })));
     if (uniq.length !== 4) return shortCode;
-    const { data: pRows } = await supabase.from("players")
-      .upsert(uniq.map(function(n){ return { owner_id: user.id, name: n }; }), { onConflict: "owner_id,name" })
-      .select("id,name");
-    if (!pRows) return shortCode;
-    const idByName = {}; pRows.forEach(function(r){ idByName[r.name] = r.id; });
-    const seatToPid = {}; seatDefs.forEach(function(x){ seatToPid[x.seat] = idByName[x.name]; });
+    const seatToPid = await cloudResolveSeatPlayerIds(user.id, seatDefs);
+    if (!seatToPid) return shortCode;
     __btsParticipants[cloudGameId] = seatToPid;
     await supabase.from("game_participants").upsert(
       seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
@@ -2109,6 +2105,34 @@ async function cloudUpdateRules(cloudGameId, rules) {
     await supabase.from("games").update({ rules: rules || null }).eq("id", cloudGameId);
   } catch (_) {}
 }
+// Resolve seat -> player_id, case-insensitively.
+//
+// players has UNIQUE (owner_id, lower(name)). Upserting "ZzDebbie" when a row
+// "Zzdebbie" already exists violates that index, so the write errors, no ids come
+// back, participants are never created, and cloudPushRound silently bails on every
+// round for the rest of the game - the score simply never moves. Match on
+// lower(name) and only insert names that genuinely do not exist yet.
+async function cloudResolveSeatPlayerIds(ownerId, seatDefs) {
+  const names = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
+  const { data: existing } = await supabase.from("players").select("id,name").eq("owner_id", ownerId);
+  const idByLower = {};
+  (existing || []).forEach(function(r){ idByLower[String(r.name).toLowerCase()] = r.id; });
+  const missing = names.filter(function(n){ return !idByLower[String(n).toLowerCase()]; });
+  if (missing.length) {
+    const { data: ins } = await supabase.from("players")
+      .insert(missing.map(function(n){ return { owner_id: ownerId, name: n }; }))
+      .select("id,name");
+    (ins || []).forEach(function(r){ idByLower[String(r.name).toLowerCase()] = r.id; });
+  }
+  const seatToPid = {};
+  for (var i = 0; i < seatDefs.length; i++) {
+    const pid = idByLower[String(seatDefs[i].name).toLowerCase()];
+    if (!pid) return null;                 // never write a participant with a null id
+    seatToPid[seatDefs[i].seat] = pid;
+  }
+  return seatToPid;
+}
+
 async function cloudEnsureParticipants(cloudGameId, teams) {
   if (__btsParticipants[cloudGameId]) return __btsParticipants[cloudGameId];
   try {
@@ -2129,18 +2153,13 @@ async function cloudEnsureParticipants(cloudGameId, teams) {
       { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
     ];
     if (seatDefs.some(function(x){ return !x.name; })) return null;
-    const uniq = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
+    const uniq = Array.from(new Set(seatDefs.map(function(x){ return String(x.name).toLowerCase(); })));
     if (uniq.length !== 4) return null;
-    const { data: pRows } = await supabase.from("players")
-      .upsert(uniq.map(function(n){ return { owner_id: user.id, name: n }; }), { onConflict: "owner_id,name" })
-      .select("id,name");
-    if (!pRows || !pRows.length) return null;
-    const idByName = {}; pRows.forEach(function(r){ idByName[r.name] = r.id; });
-    if (seatDefs.some(function(x){ return !idByName[x.name]; })) return null;
+    const m2 = await cloudResolveSeatPlayerIds(user.id, seatDefs);
+    if (!m2) return null;
     await supabase.from("game_participants").upsert(
-      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
+      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: m2[x.seat], team: x.team, seat: x.seat }; }),
       { onConflict: "game_id,seat" });
-    const m2 = {}; seatDefs.forEach(function(x){ m2[x.seat] = idByName[x.name]; });
     __btsParticipants[cloudGameId] = m2; return m2;
   } catch (_) { return null; }
 }
