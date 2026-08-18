@@ -746,7 +746,7 @@ function EditableName({ value, onChange, style }) {
 
 // ─── Player Row ───────────────────────────────────────────────────────────────
 
-function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer, seat, bidRefs }) {
+function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onBid, onTricks, isActive, onBidComplete, bidRef, isDealer, seat, bidRefs, trickRefs, onTricksComplete }) {
   const ns = nilBtnStyle(nilState);
   const isNil = nilState > 0;
 
@@ -778,7 +778,17 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
       </div>
 
       <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="13" placeholder="Tricks taken" value={tricks}
-        onChange={function(ev) { var v=ev.target.value; if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) onTricks(v); }}
+        ref={function(el){ if(trickRefs && seat){ trickRefs.current[seat] = el; } }}
+        onChange={function(ev) {
+          var v=ev.target.value;
+          if(v===""||(parseInt(v)>=0&&parseInt(v)<=13)) {
+            var wasEmpty = (tricks==="");
+            onTricks(v);
+            // Same cadence as bidding: first entry in this box hands the cursor
+            // to the next seat, so the scorer never reaches for the screen.
+            if(v!=="" && wasEmpty && onTricksComplete) onTricksComplete(seat);
+          }
+        }}
         style={iStyle({ borderColor: nilState === 2 ? "rgba(0,191,255,0.55)" : nilState === 1 ? "rgba(200,168,78,0.55)" : "rgba(255,255,255,0.35)", color: tricks === "" ? "#8a9aaa" : "#e8dcc8" })} />
     </div>
   );
@@ -786,7 +796,7 @@ function PlayerRow({ name, onNameChange, nilState, bid, tricks, onToggleNil, onB
 
 // ─── Team Card ────────────────────────────────────────────────────────────────
 
-function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2, seatP1, seatP2, bidRefs }) {
+function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerName, activeP1, activeP2, onAdvanceBid, isDealerP1, isDealerP2, seatP1, seatP2, bidRefs, trickRefs, onAdvanceTrick }) {
   const e = entry[ti];
   const bothNil = e.p1nil > 0 && e.p2nil > 0;
   const total = calcTeamBid(e);
@@ -832,8 +842,8 @@ function TeamCard({ team, ti, entry, onToggleNil, onField, onTeamName, onPlayerN
 
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }} />
 
-      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} seat={seatP1} bidRefs={bidRefs} />
-      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} seat={seatP2} bidRefs={bidRefs} />
+      <PlayerRow name={team.p[0]} onNameChange={function(v) { onPlayerName(ti, 0, v); }} nilState={e.p1nil} bid={e.p1bid} tricks={e.p1tricks} onToggleNil={function() { onToggleNil(ti, 1); }} onBid={function(v) { onField(ti, "p1bid", v); }} onTricks={function(v) { onField(ti, "p1tricks", v); }} isActive={activeP1} onBidComplete={onAdvanceBid} isDealer={isDealerP1} seat={seatP1} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
+      <PlayerRow name={team.p[1]} onNameChange={function(v) { onPlayerName(ti, 1, v); }} nilState={e.p2nil} bid={e.p2bid} tricks={e.p2tricks} onToggleNil={function() { onToggleNil(ti, 2); }} onBid={function(v) { onField(ti, "p2bid", v); }} onTricks={function(v) { onField(ti, "p2tricks", v); }} isActive={activeP2} onBidComplete={onAdvanceBid} isDealer={isDealerP2} seat={seatP2} bidRefs={bidRefs} trickRefs={trickRefs} onTricksComplete={onAdvanceTrick} />
 
       {warn && !setAlert && (
         <div style={{ background: RED, color: DIM, fontSize: "11px", fontWeight: "bold", textAlign: "center", padding: "9px", borderRadius: "7px", textTransform: "uppercase", letterSpacing: "1px" }}>
@@ -2665,6 +2675,14 @@ function TVScoreboard({ code }) {
         <div style={{ fontSize: "1.9vh", color: danger ? "#e0908a" : "#c8a84e", fontFamily: "Arial, sans-serif", letterSpacing: "0.05vw" }}>{done ? " " : (t.toGo != null ? (danger ? "danger zone" : (t.toGo + " to go")) : " ")}</div>
         <div style={{ fontSize: "2.1vh", color: (t.bags >= bagLimit - 1) ? "#e0605c" : ((t.bags >= bagLimit - 3) ? "#e8943a" : "#8aaabb"), marginTop: "0.8vh", fontFamily: "Arial, sans-serif" }}>{(t.bags || 0) + " / " + bagLimit + " bags"}</div>
         {bagPips(t.bags || 0, bagLimit)}
+        {((t.bags || 0) >= bagLimit - 2 && (t.bags || 0) < bagLimit) ? (
+          <div style={{ marginTop: "1.1vh", display: "inline-block", padding: "0.5vh 1.4vw", borderRadius: "99px",
+            background: "rgba(224,92,92,0.14)", border: "0.22vh solid rgba(224,92,92,0.75)", color: "#e0605c",
+            fontSize: "1.9vh", fontWeight: "bold", letterSpacing: "0.12vw", fontFamily: "Arial, sans-serif",
+            animation: "btsbag 1.5s ease-in-out infinite" }}>
+            {"\u26A0 BAG LADY \u00B7 " + (bagLimit - (t.bags || 0)) + " FROM " + (bagLimit * -10)}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -2713,6 +2731,7 @@ function TVScoreboard({ code }) {
   }
   return (
     <div style={container}>
+      <style>{"@keyframes btsbag{0%,100%{opacity:1}50%{opacity:0.45}}"}</style>
       {/* Browsers block audio until the page is interacted with, and a cast TV is
           opened from a URL with no interaction — so the first cue would be
           silently swallowed. This gate is the required first tap. */}
@@ -2720,7 +2739,7 @@ function TVScoreboard({ code }) {
         <div style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(6,9,20,0.95)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 6vw" }}>
           <div style={{ fontSize: "6vh", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.4vw" }}>♠ Enable the bid clock</div>
           <div style={{ fontSize: "2.5vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2vh", maxWidth: "60vw" }}>
-            The 15-second bid clock plays a countdown cue and a buzzer. Your TV will not play sound until you tap.
+            {"The " + BID_SECONDS + "-second bid clock plays a countdown cue and a buzzer. Your TV will not play sound until you tap."}
           </div>
           <div style={{ display: "flex", gap: "2vw", marginTop: "5vh" }}>
             <button onClick={enableAudio} style={{ background: "#c8a84e", color: "#0a0e1b", border: "none", borderRadius: "1.2vh", padding: "2vh 4vw", fontSize: "2.8vh", fontWeight: "bold", cursor: "pointer", fontFamily: "Georgia, serif" }}>Turn sound on</button>
@@ -2868,6 +2887,7 @@ function RecapView({ code }) {
 export default function App() {
   const [gs, setGs] = useState(load);
   const bidRefs = useRef({});
+  const trickRefs = useRef({});
   const lastPushedRound = useRef(0);
   const startedCloudGame = useRef(null);
   const [scoreShake, setScoreShake] = useState(false);
@@ -3273,6 +3293,20 @@ export default function App() {
     upd(function(s) { return Object.assign({}, s, { activeBidSeat: next }); });
     focusBid(next);
   }
+  // Tricks cadence: entering a count hands the cursor to the next seat, in the
+  // same clockwise order bidding uses, so the scorer can go 1 -> 2 -> 3 -> 4
+  // without touching the screen between players.
+  function advanceTrickSeat(fromSeat) {
+    if (!gs.seating || !gs.seating.dealer || !fromSeat) return;
+    const order = getBidOrder(gs.seating.dealer);
+    const idx = order.indexOf(fromSeat);
+    if (idx === -1 || idx >= order.length - 1) return;   // last seat: stop, do not wrap
+    const next = order[idx + 1];
+    try {
+      const el = trickRefs.current[next];
+      if (el && el.focus) { el.focus(); if (el.select) el.select(); }
+    } catch (_) {}
+  }
   function startRoundBidding() {
     if (!gs.seating || !gs.seating.dealer) return;
     const order = getBidOrder(gs.seating.dealer);
@@ -3438,7 +3472,7 @@ export default function App() {
                   <TeamCard key={ti + team.name + team.p[0] + team.p[1]} team={team} ti={ti} entry={gs.entry}
                     activeP1={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[0] : false} isDealerP1={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[0] : false}
                     activeP2={gs.activeBidSeat && gs.seating ? gs.seating[gs.activeBidSeat] === team.p[1] : false} isDealerP2={gs.seating && gs.seating.dealer ? gs.seating[gs.seating.dealer] === team.p[1] : false}
-                    onAdvanceBid={advanceBidSeat} seatP1={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[0]; }) || null) : null} seatP2={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[1]; }) || null) : null} bidRefs={bidRefs}
+                    onAdvanceBid={advanceBidSeat} trickRefs={trickRefs} onAdvanceTrick={advanceTrickSeat} seatP1={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[0]; }) || null) : null} seatP2={gs.seating ? (["N","E","S","W"].find(function(st){ return gs.seating[st] === team.p[1]; }) || null) : null} bidRefs={bidRefs}
                     onToggleNil={toggleNil} onField={setField}
                     onTeamName={function(v) { setTeamName(ti, v); }}
                     onPlayerName={setPlayerName} />
