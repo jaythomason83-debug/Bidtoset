@@ -1079,7 +1079,7 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
     const lines = [
       "♠ BidToSet Game Summary ♠",
       "─────────────────────────",
-      winner ? (winner.name + " WINS " + winner.score + " - " + loser.score) : "Game Over",
+      winner ? (winner.name + " " + winVerb(winner.name).toUpperCase() + " " + winner.score + " - " + loser.score) : "Game Over",
       gs.rounds.length + " rounds played",
       "",
       "🏆 MVP: " + summary.mvp.name + " (" + summary.mvp.bidAccuracy + "% bid accuracy)",
@@ -2109,19 +2109,46 @@ async function cloudUpdateRules(cloudGameId, rules) {
     await supabase.from("games").update({ rules: rules || null }).eq("id", cloudGameId);
   } catch (_) {}
 }
-async function cloudEnsureParticipants(cloudGameId) {
+async function cloudEnsureParticipants(cloudGameId, teams) {
   if (__btsParticipants[cloudGameId]) return __btsParticipants[cloudGameId];
   try {
     const { data: parts } = await supabase.from("game_participants").select("seat, player_id").eq("game_id", cloudGameId);
-    if (!parts || !parts.length) return null;
-    const m = {}; parts.forEach(function(p){ m[p.seat] = p.player_id; });
-    __btsParticipants[cloudGameId] = m; return m;
+    if (parts && parts.length === 4) {
+      const m = {}; parts.forEach(function(p){ m[p.seat] = p.player_id; });
+      __btsParticipants[cloudGameId] = m; return m;
+    }
+    // SELF-HEAL. cloudStartGame runs exactly once per game and returns silently
+    // if the player names were not populated at that instant. Without a rebuild
+    // here, cloudPushRound bails on every round for the rest of the game and the
+    // score never moves - which is exactly what happened to game K9ZU7V.
+    if (!teams || teams.length !== 2 || !teams[0].p || !teams[1].p) return null;
+    const { data: u } = await supabase.auth.getUser();
+    const user = u && u.user; if (!user) return null;
+    const seatDefs = [
+      { name: teams[0].p[0], team: 0, seat: 0 }, { name: teams[1].p[0], team: 1, seat: 1 },
+      { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
+    ];
+    if (seatDefs.some(function(x){ return !x.name; })) return null;
+    const uniq = Array.from(new Set(seatDefs.map(function(x){ return x.name; })));
+    if (uniq.length !== 4) return null;
+    const { data: pRows } = await supabase.from("players")
+      .upsert(uniq.map(function(n){ return { owner_id: user.id, name: n }; }), { onConflict: "owner_id,name" })
+      .select("id,name");
+    if (!pRows || !pRows.length) return null;
+    const idByName = {}; pRows.forEach(function(r){ idByName[r.name] = r.id; });
+    if (seatDefs.some(function(x){ return !idByName[x.name]; })) return null;
+    await supabase.from("game_participants").upsert(
+      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
+      { onConflict: "game_id,seat" });
+    const m2 = {}; seatDefs.forEach(function(x){ m2[x.seat] = idByName[x.name]; });
+    __btsParticipants[cloudGameId] = m2; return m2;
   } catch (_) { return null; }
 }
+
 async function cloudPushRound(cloudGameId, teams, round, newTeams) {
   try {
     if (!cloudGameId || !round || !round.entry || round.entry.length !== 2) return;
-    const seatToPid = await cloudEnsureParticipants(cloudGameId);
+    const seatToPid = await cloudEnsureParticipants(cloudGameId, teams);
     if (!seatToPid) return;
     const e0 = round.entry[0], e1 = round.entry[1], res = round.results || [], pen = round.penalties || [0, 0];
     function tBid(e){ return (e.p1nil > 0 ? 0 : (parseInt(e.p1bid) || 0)) + (e.p2nil > 0 ? 0 : (parseInt(e.p2bid) || 0)); }
@@ -2208,6 +2235,12 @@ async function cloudPushLive(cloudGameId, live) {
 }
 async function cloudDeleteRound(cloudGameId, roundNumber) {
   try { if (cloudGameId && roundNumber) { await supabase.from("rounds").delete().eq("game_id", cloudGameId).eq("round_number", roundNumber); await supabase.from("games").update({ total_rounds: roundNumber - 1 }).eq("id", cloudGameId); } } catch (_) {}
+}
+
+// "Debbie and Jay wins" is wrong - a compound name is a plural subject. Pick the
+// verb from the name so both "Debbie and Jay win" and "Team 1 wins" read right.
+function winVerb(name) {
+  return /\s(and|&|\+)\s/i.test(String(name || "")) ? "win" : "wins";
 }
 
 function parseTvCode() {
@@ -2706,7 +2739,7 @@ function TVScoreboard({ code }) {
           <div style={{ color: "#3d4a5a", fontSize: "2.3vh", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{waiting ? "" : "Round in progress…"}</div>
         )}
       </div>
-      <div style={{ textAlign: "center", fontSize: "3.6vh", color: "#c8a84e", height: "4.4vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("♠ " + d.teams[win].name + " wins") : ""}</div>
+      <div style={{ textAlign: "center", fontSize: "3.6vh", color: "#c8a84e", height: "4.4vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("♠ " + d.teams[win].name + " " + winVerb(d.teams[win].name).toUpperCase()) : ""}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "6vh", fontFamily: "Arial, sans-serif", fontSize: "3.4vh", color: "#a8bccc", borderTop: strip ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
         {strip && strip.heavyLifter && stripItem("Heavy Lifter", strip.heavyLifter.name + " " + strip.heavyLifter.pct + "%", true)}
         {strip && strip.deadWeight && stripItem("Dead Weight", strip.deadWeight.name + " " + strip.deadWeight.pct + "%", !strip.heavyLifter)}
@@ -3738,7 +3771,7 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 350, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", backdropFilter: "blur(8px)" }}>
           <div style={{ background: "#141926", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "16px", padding: "24px", width: "100%", maxWidth: "360px", boxShadow: "0 0 40px rgba(0,0,0,0.6)" }}>
             <div style={{ fontSize: "10px", color: "#8aaabb", letterSpacing: "3px", textAlign: "center", textTransform: "uppercase", marginBottom: "6px" }}>Confirm Final Score</div>
-            <div style={{ fontSize: "18px", color: GOLD, fontWeight: "bold", textAlign: "center", marginBottom: "16px", fontVariant: "small-caps" }}>{gs.teams[gs.winner].name} wins</div>
+            <div style={{ fontSize: "18px", color: GOLD, fontWeight: "bold", textAlign: "center", marginBottom: "16px", fontVariant: "small-caps" }}>{gs.teams[gs.winner].name + " " + winVerb(gs.teams[gs.winner].name)}</div>
             {gs.teams.map(function(t, i) {
               return (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: "10px", marginBottom: "8px", background: i === gs.winner ? "rgba(200,168,78,0.14)" : "rgba(255,255,255,0.04)", border: "1px solid " + (i === gs.winner ? "rgba(200,168,78,0.4)" : "rgba(255,255,255,0.08)") }}>
