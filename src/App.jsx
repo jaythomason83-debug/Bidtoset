@@ -2492,47 +2492,9 @@ function TVScoreboard({ code }) {
   var container = { position: "fixed", inset: 0, background: "#0a0e1b", backgroundImage: "radial-gradient(ellipse at 20% 30%,#0c1e3a 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#180a2a 0%,transparent 55%)", color: "#e6edf5", fontFamily: "Georgia, serif", display: "flex", flexDirection: "column", padding: "3vh 3vw", overflow: "hidden", zIndex: 99999 };
   var foot = { textAlign: "center", color: "#4a5a6a", fontSize: "1.8vh", fontFamily: "Arial, sans-serif" };
 
-  if (d && d.mode === "recap") {
-    var hl = d.highlights || [];
-    var cur = hl.length ? hl[reelIdx % hl.length] : null;
-    var roast = cur && (cur.kind === "deadweight" || cur.kind === "nilbust" || cur.kind === "bags");
-    return (
-      <div style={container}>
-        <style>{"@keyframes btsfade{0%{opacity:0;transform:translateY(1.6vh)}100%{opacity:1;transform:translateY(0)}}"}</style>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
-          ♠ BidToSet <span style={{ color: "#8aaabb" }}>· Last game recap</span>
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {cur && (
-            <div key={reelIdx} style={{ textAlign: "center", padding: "0 4vw", animation: "btsfade 0.6s ease" }}>
-              <div style={{ fontSize: "6.5vh", color: roast ? "#e0605c" : "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.35vw", fontWeight: "bold", marginBottom: "2vh" }}>{cur.headline}</div>
-              <div style={{ fontSize: "13vh", lineHeight: 1, color: "#f0ead8", fontWeight: "bold", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cur.name}</div>
-              <div style={{ fontSize: "3.4vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2.4vh" }}>{cur.sub}</div>
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "1.4vw", height: "3.4vh" }}>
-          {hl.map(function(_, i) { return <span key={i} style={{ width: "1.3vh", height: "1.3vh", borderRadius: "50%", background: i === (reelIdx % (hl.length || 1)) ? "#c8a84e" : "rgba(255,255,255,0.18)" }} />; })}
-        </div>
-        <div style={foot}>bidtoset.app · game recap</div>
-      </div>
-    );
-  }
-
-  if (d && d.mode === "empty") {
-    return (
-      <div style={container}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>♠ BidToSet</div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#8aaabb", fontSize: "4vh", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>Waiting for the next game…</div>
-        <div style={foot}>bidtoset.app · live scoreboard</div>
-      </div>
-    );
-  }
-
-  var done = d && d.status === "completed";
-  var win = d ? d.winningTeam : null;
-  var strip = d && d.strip;
-  var ev = d && d.event;
+  // NOTE: every hook below must stay ABOVE the recap/empty early returns.
+  // Hook order has to be identical on every render - putting a hook after an
+  // early return crashes the component the moment the mode changes.
   // Realtime wins when present (sub-100ms); the 2s poll seeds a TV joining late.
   var live = liveOverride || ((d && d.live && d.live.seats) ? d.live : null);
   var timer = null;
@@ -2574,6 +2536,48 @@ function TVScoreboard({ code }) {
     var t = setTimeout(function() { setLiveBanner(null); }, 7000);
     return function() { clearTimeout(t); };
   }, [live ? live.round : null, live ? live.complete : false, live && live.totals ? live.totals.join(",") : ""]);
+
+  if (d && d.mode === "recap") {
+    var hl = d.highlights || [];
+    var cur = hl.length ? hl[reelIdx % hl.length] : null;
+    var roast = cur && (cur.kind === "deadweight" || cur.kind === "nilbust" || cur.kind === "bags");
+    return (
+      <div style={container}>
+        <style>{"@keyframes btsfade{0%{opacity:0;transform:translateY(1.6vh)}100%{opacity:1;transform:translateY(0)}}"}</style>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>
+          ♠ BidToSet <span style={{ color: "#8aaabb" }}>· Last game recap</span>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {cur && (
+            <div key={reelIdx} style={{ textAlign: "center", padding: "0 4vw", animation: "btsfade 0.6s ease" }}>
+              <div style={{ fontSize: "6.5vh", color: roast ? "#e0605c" : "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.35vw", fontWeight: "bold", marginBottom: "2vh" }}>{cur.headline}</div>
+              <div style={{ fontSize: "13vh", lineHeight: 1, color: "#f0ead8", fontWeight: "bold", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cur.name}</div>
+              <div style={{ fontSize: "3.4vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2.4vh" }}>{cur.sub}</div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "1.4vw", height: "3.4vh" }}>
+          {hl.map(function(_, i) { return <span key={i} style={{ width: "1.3vh", height: "1.3vh", borderRadius: "50%", background: i === (reelIdx % (hl.length || 1)) ? "#c8a84e" : "rgba(255,255,255,0.18)" }} />; })}
+        </div>
+        <div style={foot}>bidtoset.app · game recap</div>
+      </div>
+    );
+  }
+
+  if (d && d.mode === "empty") {
+    return (
+      <div style={container}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>♠ BidToSet</div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#8aaabb", fontSize: "4vh", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>Waiting for the next game…</div>
+        <div style={foot}>bidtoset.app · live scoreboard</div>
+      </div>
+    );
+  }
+
+  var done = d && d.status === "completed";
+  var win = d ? d.winningTeam : null;
+  var strip = d && d.strip;
+  var ev = d && d.event;
   function enableAudio() {
     var a = makeBidAudio();
     if (a) { try { a.ctx.resume(); a.tick(880); } catch (_) {} setAudio(a); }
