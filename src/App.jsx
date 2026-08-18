@@ -2076,6 +2076,13 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams, rules) {
       rounds: [],
     }, { onConflict: "owner_id,client_id" }).select("short_code").single();
     const shortCode = gRow ? gRow.short_code : null;
+    // Exactly one game may be live at a time. Anything else still marked
+    // in_progress is abandoned, and would otherwise hijack the TV.
+    try {
+      await supabase.from("games")
+        .update({ status: "completed", ended_at: new Date().toISOString(), live_state: null })
+        .eq("owner_id", user.id).eq("status", "in_progress").neq("id", cloudGameId);
+    } catch (_) {}
     const seatDefs = [
       { name: teams[0].p[0], team: 0, seat: 0 }, { name: teams[1].p[0], team: 1, seat: 1 },
       { name: teams[0].p[1], team: 0, seat: 2 }, { name: teams[1].p[1], team: 1, seat: 3 },
@@ -2183,6 +2190,14 @@ function broadcastLive(cloudGameId, raw) {
                  bidStartedAt: raw.bidStartedAt, armed: raw.armed !== false };
     }
     _liveChan.send({ type: "broadcast", event: "live", payload: { live: shaped, sentAt: Date.now() } });
+  } catch (_) {}
+}
+async function cloudEndGame(cloudGameId) {
+  try {
+    if (!cloudGameId) return;
+    await supabase.from("games")
+      .update({ status: "completed", ended_at: new Date().toISOString(), live_state: null })
+      .eq("id", cloudGameId).eq("status", "in_progress");
   } catch (_) {}
 }
 async function cloudPushLive(cloudGameId, live) {
@@ -2487,9 +2502,10 @@ function TVScoreboard({ code }) {
     liveBannerKey.current = key;
     if (total === 13) { setLiveBanner(null); return; }
     var short = 13 - total;
+    // Keep the subline to ONE line or the pill grows and swallows the scores.
     setLiveBanner(short > 0
-      ? { headline: "TABLE BID " + total, sub: short + " short — somebody's eating bags this hand" }
-      : { headline: "TABLE BID " + total, sub: "over by " + (-short) + " — somebody's getting set" });
+      ? { headline: "BAGS INCOMING", sub: total + " bid, 13 books — somebody's eating bags" }
+      : { headline: "BID TO SET", sub: total + " bid, 13 books — somebody's going down" });
     var t = setTimeout(function() { setLiveBanner(null); }, 7000);
     return function() { clearTimeout(t); };
   }, [live ? live.round : null, live ? live.complete : false, live && live.totals ? live.totals.join(",") : ""]);
@@ -3110,6 +3126,10 @@ export default function App() {
     // when a winner is detected. Abandoned/incomplete games are intentionally not
     // archived here (they clutter History and pollute stats). When multi-game lands,
     // in-progress games get parked in a separate resumable store, not History.
+    // Close the outgoing game in the cloud right away. Setup takes a minute or
+    // two, and until the new game is committed there is no new row — without
+    // this the TV keeps presenting the finished game as if it were live.
+    if (gs.cloudGameId) cloudEndGame(gs.cloudGameId);
     try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
     setGs(newGame(gs));
     setShowSummary(false);
