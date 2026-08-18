@@ -658,15 +658,46 @@ function newGame(prev) {
   };
 }
 
+// A saved game whose `seating` names disagree with its `teams` names is broken in
+// a quiet way: every seat lookup is by name, so a mismatch means bidding never
+// advances, refs never register, and no keypad appears. States saved by builds
+// before setPlayerName kept the two in sync can be in exactly that shape, so
+// repair on load - keep the seats that match and hand the leftovers to the
+// leftover names, by position.
+function reconcileSeating(s) {
+  try {
+    if (!s || !s.seating || !s.teams || s.teams.length !== 2) return s;
+    if (!s.teams[0].p || !s.teams[1].p) return s;
+    var compass = ["N", "E", "S", "W"];
+    var names = [s.teams[0].p[0], s.teams[0].p[1], s.teams[1].p[0], s.teams[1].p[1]];
+    var seating = Object.assign({}, s.seating);
+    var usedC = {}, usedN = {};
+    compass.forEach(function (c) {
+      for (var i = 0; i < names.length; i++) {
+        if (!usedN[i] && names[i] === seating[c]) { usedC[c] = true; usedN[i] = true; return; }
+      }
+    });
+    var freeC = compass.filter(function (c) { return !usedC[c]; });
+    var freeN = names.filter(function (n, i) { return !usedN[i]; });
+    if (!freeC.length) return s;
+    freeC.forEach(function (c, k) { if (freeN[k] !== undefined) seating[c] = freeN[k]; });
+    s.seating = seating;
+  } catch (_) {}
+  return s;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      s.entry = [blank(), blank()];
+      // Restore the hand in play. Fill any missing field from blank() so an entry
+      // written by an older build can never come back half-shaped.
+      if (!Array.isArray(s.entry) || s.entry.length !== 2) s.entry = [blank(), blank()];
+      else s.entry = s.entry.map(function(e) { return Object.assign(blank(), e || {}); });
       s.lastResult = null;
       s.showHistory = false;
-      return s;
+      return reconcileSeating(s);
     }
   } catch (_) {}
   return newGame();
@@ -674,8 +705,12 @@ function load() {
 
 function save(s) {
   try {
+    // entry (bids/nils/tricks for the hand in play) MUST be persisted. It used to
+    // be stripped, so any reload - iOS reclaiming the tab, a backgrounded PWA, a
+    // service-worker update, a pull-to-refresh - wiped the bids clean. The window
+    // is the whole hand: bids go in, 13 tricks get played, then tricks go in.
     localStorage.setItem(STORAGE_KEY, JSON.stringify(
-      Object.assign({}, s, { entry: [], lastResult: null, showHistory: false })
+      Object.assign({}, s, { lastResult: null, showHistory: false })
     ));
   } catch (_) {}
 }
@@ -2122,7 +2157,7 @@ async function cloudStartGame(cloudGameId, clientId, shareCode, teams, rules) {
     if (!seatToPid) return shortCode;
     __btsParticipants[cloudGameId] = seatToPid;
     await supabase.from("game_participants").upsert(
-      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: idByName[x.name], team: x.team, seat: x.seat }; }),
+      seatDefs.map(function(x){ return { game_id: cloudGameId, player_id: seatToPid[x.seat], team: x.team, seat: x.seat }; }),
       { onConflict: "game_id,seat" });
     return shortCode;
   } catch (_) {}
@@ -3101,13 +3136,22 @@ export default function App() {
 
   function setPlayerName(ti, pIdx, val) {
     upd(function(s) {
+      const prev = s.teams[ti] ? s.teams[ti].p[pIdx] : null;
       const teams = s.teams.map(function(t, i) {
         if (i !== ti) return t;
         const p = [t.p[0], t.p[1]];
         p[pIdx] = val;
         return Object.assign({}, t, { p: p });
       });
-      return Object.assign({}, s, { teams: teams });
+      // seating maps compass -> NAME. If a rename updates teams but not seating,
+      // the two disagree and every name-based seat lookup silently misses that
+      // player - which is how the tricks prompt started skipping the top box.
+      var seating = s.seating;
+      if (seating && prev && prev !== val) {
+        seating = Object.assign({}, seating);
+        ["N", "E", "S", "W"].forEach(function(c) { if (seating[c] === prev) seating[c] = val; });
+      }
+      return Object.assign({}, s, { teams: teams, seating: seating });
     });
   }
 
@@ -3291,12 +3335,37 @@ export default function App() {
   function getTrickOrder() {
     if (!gs.seating || !gs.teams || gs.teams.length !== 2) return [];
     const compass = ["N", "E", "S", "W"];
-    function seatOf(nm) { return compass.find(function(c) { return gs.seating[c] === nm; }) || null; }
-    return [seatOf(gs.teams[0].p[0]), seatOf(gs.teams[0].p[1]),
-            seatOf(gs.teams[1].p[0]), seatOf(gs.teams[1].p[1])].filter(Boolean);
+    const want = [gs.teams[0].p[0], gs.teams[0].p[1], gs.teams[1].p[0], gs.teams[1].p[1]];
+    const used = {};
+    const order = want.map(function(nm) {
+      const c = compass.find(function(x) { return gs.seating[x] === nm && !used[x]; }) || null;
+      if (c) used[c] = true;
+      return c;
+    });
+    // A null here means teams and seating disagree about a name. Dropping it would
+    // silently shift the whole cadence up one box, so fill the hole with whichever
+    // compass seat is still unclaimed and keep all four boxes in screen order.
+    if (order.some(function(c) { return !c; })) {
+      const spare = compass.filter(function(c) { return !used[c]; });
+      for (var i = 0; i < order.length; i++) {
+        if (!order[i]) { order[i] = spare.shift() || null; }
+      }
+    }
+    return order.filter(Boolean);
   }
-  function focusTrick(seat) {
-    try { var el = seat ? trickRefs.current[seat] : null; if (el && el.focus) el.focus(); } catch(_) {}
+  // idx is the box's position on screen (0-3). The ref is keyed by compass seat,
+  // and the seat prop comes from a name lookup - if that ever misses, the ref was
+  // never registered and focus would silently no-op, leaving no keypad. Fall back
+  // to the box's screen position so the keypad always comes up.
+  function focusTrick(seat, idx) {
+    var el = null;
+    try { el = seat ? trickRefs.current[seat] : null; } catch(_) {}
+    if (!el && typeof idx === "number") {
+      try { el = document.querySelectorAll('input[placeholder="Tricks taken"]')[idx] || null; } catch(_) {}
+    }
+    // focus() must stay INSIDE the user gesture that called it - deferring it to a
+    // timeout or rAF is what stops iOS raising the keyboard.
+    try { if (el && el.focus) { el.focus(); if (el.select) el.select(); } } catch(_) {}
   }
   function advanceBidSeat() {
     if (!gs.seating || !gs.seating.dealer) return;
@@ -3313,7 +3382,7 @@ export default function App() {
     // so the scorer never has to reach for the screen between phases.
     const tOrder = getTrickOrder();
     upd(function(s) { return Object.assign({}, s, { activeBidSeat: next, activeTrickSeat: next === null ? (tOrder[0] || null) : s.activeTrickSeat }); });
-    if (next) focusBid(next); else focusTrick(tOrder[0]);
+    if (next) focusBid(next); else focusTrick(tOrder[0], 0);
   }
   // Tricks cadence: entering a count hands the cursor to the next seat, in the
   // same clockwise order bidding uses, so the scorer can go 1 -> 2 -> 3 -> 4
@@ -3325,7 +3394,7 @@ export default function App() {
     if (idx === -1) return;
     const next = idx < order.length - 1 ? order[idx + 1] : null;   // stop at the last box
     upd(function(s) { return Object.assign({}, s, { activeTrickSeat: next }); });
-    if (next) focusTrick(next);
+    if (next) focusTrick(next, idx + 1);
   }
   function startRoundBidding() {
     if (!gs.seating || !gs.seating.dealer) return;
