@@ -2211,52 +2211,115 @@ function makeBidAudio() {
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
     var ctx = new Ctx();
-    function tick(freq) {
-      var t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = "triangle";
-      o.frequency.setValueAtTime(freq, t);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
-      o.connect(g); g.connect(ctx.destination);
-      o.start(t); o.stop(t + 0.22);
-    }
-    function boom() {
-      var t = ctx.currentTime, dur = 1.5;
-      // Body: white noise shaped by a fast decay, pushed through a lowpass that
-      // sweeps down — the standard recipe for a convincing explosion.
-      var len = Math.floor(ctx.sampleRate * dur);
+
+    // Master chain. TV speakers roll off hard below ~100Hz and have no headroom,
+    // so the trick is loudness in the 200Hz-4kHz band, not sub-bass. Soft-clip
+    // for grit, then compress so peaks stay controlled while everything is LOUD.
+    var master = ctx.createGain(); master.gain.value = 0.95;
+    var drive = ctx.createWaveShaper();
+    (function () {
+      var n = 2048, curve = new Float32Array(n), k = 12;
+      for (var i = 0; i < n; i++) { var x = (i * 2) / n - 1; curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x)); }
+      drive.curve = curve; drive.oversample = "4x";
+    })();
+    var comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -12; comp.knee.value = 6; comp.ratio.value = 10;
+    comp.attack.value = 0.002; comp.release.value = 0.18;
+    master.connect(drive); drive.connect(comp); comp.connect(ctx.destination);
+
+    function noise(dur, curvePow) {
+      var len = Math.max(1, Math.floor(ctx.sampleRate * dur));
       var buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      var chd = buf.getChannelData(0);
+      var d = buf.getChannelData(0);
       for (var i = 0; i < len; i++) {
         var k = 1 - i / len;
-        chd[i] = (Math.random() * 2 - 1) * k * k;
+        d[i] = (Math.random() * 2 - 1) * Math.pow(k, curvePow);
       }
-      var src = ctx.createBufferSource(); src.buffer = buf;
-      var lp = ctx.createBiquadFilter(); lp.type = "lowpass";
-      lp.frequency.setValueAtTime(2200, t);
-      lp.frequency.exponentialRampToValueAtTime(110, t + dur);
-      var ng = ctx.createGain();
-      ng.gain.setValueAtTime(0.55, t);
-      ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
-      src.start(t);
-      // Sub-bass drop for the thump you feel rather than hear.
-      var o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(150, t);
-      o.frequency.exponentialRampToValueAtTime(26, t + 0.75);
-      g.gain.setValueAtTime(0.6, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
-      o.connect(g); g.connect(ctx.destination);
-      o.start(t); o.stop(t + 1.1);
+      var src = ctx.createBufferSource(); src.buffer = buf; return src;
     }
+
+    // One hit of the countdown cue: a war-drum thud with a metallic click on top.
+    function hit(t, freq, gain, dur) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "square";
+      o.frequency.setValueAtTime(freq * 2.2, t);
+      o.frequency.exponentialRampToValueAtTime(freq, t + 0.05);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      var lp = ctx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = 2600; lp.Q.value = 6;
+      o.connect(lp); lp.connect(g); g.connect(master);
+      o.start(t); o.stop(t + dur + 0.02);
+      // Click transient so it cuts through a room full of people talking.
+      var nz = noise(0.05, 3), nf = ctx.createBiquadFilter(), ng = ctx.createGain();
+      nf.type = "highpass"; nf.frequency.value = 1800;
+      ng.gain.setValueAtTime(gain * 0.7, t);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      nz.connect(nf); nf.connect(ng); ng.connect(master); nz.start(t);
+    }
+
+    // Countdown cue. Double-thump, like a heartbeat, tightening and rising as
+    // the clock runs down - far more menacing than a single blip.
+    function tick(freq) {
+      var t = ctx.currentTime;
+      var urgency = Math.max(0, Math.min(1, (freq - 440) / 440));   // 0 at 5s, 1 at 1s
+      var gap = 0.16 - urgency * 0.06;
+      var base = 110 + urgency * 90;
+      var gain = 0.55 + urgency * 0.35;
+      hit(t, base, gain, 0.20);
+      hit(t + gap, base * 1.5, gain * 0.95, 0.24);
+    }
+
+    // The buzzer. Four layers, all kept inside what a TV can actually reproduce.
+    function boom() {
+      var t = ctx.currentTime;
+
+      // 1) Crack - the initial transient.
+      var cz = noise(0.09, 2), cf = ctx.createBiquadFilter(), cg = ctx.createGain();
+      cf.type = "highpass"; cf.frequency.value = 1200;
+      cg.gain.setValueAtTime(0.95, t); cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+      cz.connect(cf); cf.connect(cg); cg.connect(master); cz.start(t);
+
+      // 2) Body - noise through a resonant lowpass sweeping down, but stopping at
+      //    300Hz rather than 110Hz so a TV speaker can still move air.
+      var bz = noise(1.9, 1.6), bf = ctx.createBiquadFilter(), bg = ctx.createGain();
+      bf.type = "lowpass"; bf.Q.value = 4;
+      bf.frequency.setValueAtTime(4200, t);
+      bf.frequency.exponentialRampToValueAtTime(300, t + 1.5);
+      bg.gain.setValueAtTime(0.9, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+      bz.connect(bf); bf.connect(bg); bg.connect(master); bz.start(t);
+
+      // 3) Rumble - two detuned saws beating against each other for grit.
+      [82, 87].forEach(function (f, idx) {
+        var o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        o.type = "sawtooth";
+        o.frequency.setValueAtTime(f * 3, t);
+        o.frequency.exponentialRampToValueAtTime(f, t + 0.5);
+        lp.type = "lowpass"; lp.frequency.setValueAtTime(1400, t);
+        lp.frequency.exponentialRampToValueAtTime(220, t + 2.2);
+        g.gain.setValueAtTime(0.5 - idx * 0.1, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+        o.connect(lp); lp.connect(g); g.connect(master);
+        o.start(t); o.stop(t + 2.45);
+      });
+
+      // 4) Power-down siren, the "you're done" tail.
+      var o2 = ctx.createOscillator(), g2 = ctx.createGain();
+      o2.type = "square";
+      o2.frequency.setValueAtTime(520, t + 0.04);
+      o2.frequency.exponentialRampToValueAtTime(90, t + 1.1);
+      g2.gain.setValueAtTime(0.0001, t);
+      g2.gain.exponentialRampToValueAtTime(0.45, t + 0.06);
+      g2.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+      o2.connect(g2); g2.connect(master);
+      o2.start(t); o2.stop(t + 1.35);
+    }
+
     return { ctx: ctx, tick: tick, boom: boom };
   } catch (_) { return null; }
 }
 
-// Bags progress toward the penalty, as discrete pips so the room can COUNT how
-// many bags are left before it bites. Falls back to a bar for unusual bag limits.
 function bagPips(bags, limit) {
   var n = (limit > 0) ? limit : 10;
   var filled = Math.max(0, Math.min(n, bags || 0));
@@ -2412,6 +2475,24 @@ function TVScoreboard({ code }) {
       f.boom = true; audio.boom();
     }
   }, [nowTick, audio, muted, timer ? timer.key : null]);
+  // Fires once when the fourth bid lands. Purely client-side: every bid is
+  // already in `live`, so this costs no extra round trip.
+  const [liveBanner, setLiveBanner] = React.useState(null);
+  const liveBannerKey = React.useRef(null);
+  React.useEffect(function() {
+    if (!live || !live.complete || !live.totals) { return; }
+    var total = (live.totals[0] || 0) + (live.totals[1] || 0);
+    var key = "tb:" + live.round + ":" + total;
+    if (liveBannerKey.current === key) return;
+    liveBannerKey.current = key;
+    if (total === 13) { setLiveBanner(null); return; }
+    var short = 13 - total;
+    setLiveBanner(short > 0
+      ? { headline: "TABLE BID " + total, sub: short + " short — somebody's eating bags this hand" }
+      : { headline: "TABLE BID " + total, sub: "over by " + (-short) + " — somebody's getting set" });
+    var t = setTimeout(function() { setLiveBanner(null); }, 7000);
+    return function() { clearTimeout(t); };
+  }, [live ? live.round : null, live ? live.complete : false, live && live.totals ? live.totals.join(",") : ""]);
   function enableAudio() {
     var a = makeBidAudio();
     if (a) { try { a.ctx.resume(); a.tick(880); } catch (_) {} setAudio(a); }
@@ -2504,7 +2585,7 @@ function TVScoreboard({ code }) {
   }
   function stripItem(label, value, first) {
     return (
-      <span style={{ padding: "0 1.6vw", borderLeft: first ? "none" : "1px solid rgba(255,255,255,0.12)" }}><span style={{ color: "#c8a84e" }}>{label}</span> · {value}</span>
+      <span style={{ padding: "0 2.2vw", borderLeft: first ? "none" : "1px solid rgba(255,255,255,0.14)", whiteSpace: "nowrap" }}><span style={{ color: "#c8a84e" }}>{label}</span> · {value}</span>
     );
   }
   // Round summary — a TV-scaled copy of the phone app's ResultCard. Same line
@@ -2581,10 +2662,10 @@ function TVScoreboard({ code }) {
         {panel(0)}
         {centerSlot()}
         {panel(1)}
-        {banner && !done && (
+        {(banner || liveBanner) && !done && (
           <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", background: "#c8a84e", color: "#2a1e04", padding: "2vh 4vw", borderRadius: "99px", textAlign: "center", boxShadow: "0 0 9vh rgba(200,168,78,0.55)", maxWidth: "84vw" }}>
-            <div style={{ fontSize: "5.4vh", lineHeight: 1.05, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{"♠ " + banner.headline}</div>
-            <div style={{ fontSize: "2.6vh", fontFamily: "Arial, sans-serif", letterSpacing: "0.06vw", marginTop: "0.6vh" }}>{banner.sub}</div>
+            <div style={{ fontSize: "5.4vh", lineHeight: 1.05, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "0.25vw" }}>{"♠ " + (banner || liveBanner).headline}</div>
+            <div style={{ fontSize: "2.6vh", fontFamily: "Arial, sans-serif", letterSpacing: "0.06vw", marginTop: "0.6vh" }}>{(banner || liveBanner).sub}</div>
           </div>
         )}
       </div>
@@ -2610,7 +2691,7 @@ function TVScoreboard({ code }) {
         )}
       </div>
       <div style={{ textAlign: "center", fontSize: "3.6vh", color: "#c8a84e", height: "4.4vh", fontVariant: "small-caps", letterSpacing: "0.3vw" }}>{((win === 0 || win === 1) && d && d.teams) ? ("♠ " + d.teams[win].name + " wins") : ""}</div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "4.2vh", fontFamily: "Arial, sans-serif", fontSize: "2vh", color: "#8aaabb", borderTop: strip ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "6vh", fontFamily: "Arial, sans-serif", fontSize: "3.4vh", color: "#a8bccc", borderTop: strip ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
         {strip && strip.heavyLifter && stripItem("Heavy Lifter", strip.heavyLifter.name + " " + strip.heavyLifter.pct + "%", true)}
         {strip && strip.deadWeight && stripItem("Dead Weight", strip.deadWeight.name + " " + strip.deadWeight.pct + "%", !strip.heavyLifter)}
         {strip && strip.bidLeader && stripItem("Bid leader", strip.bidLeader.name + " " + strip.bidLeader.made + "/" + strip.bidLeader.att, !(strip.heavyLifter || strip.deadWeight))}
