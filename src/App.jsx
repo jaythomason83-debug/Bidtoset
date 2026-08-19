@@ -1477,6 +1477,17 @@ function HistoryScreen({ onClose, onReset }) {
     }
   }
 
+  // Delete ONE game. Clearing everything was the only option before, which meant
+  // a couple of junk test games could only be removed by throwing away every real
+  // game with them.
+  function deleteGame(id, label) {
+    if (!window.confirm("Delete this game?\n\n" + label + "\n\nThis cannot be undone.")) return;
+    const next = history.filter(function (g) { return g.id !== id; });
+    setHistory(next);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch (_) {}
+    if (selected === id) setSelected(null);
+  }
+
   if (selected) {
     const game = history.find(function(g) { return g.id === selected; });
     return (
@@ -1557,8 +1568,22 @@ function HistoryScreen({ onClose, onReset }) {
             {history.map(function(game) {
               return (
                 <div key={game.id} onClick={function() { setSelected(game.id); }}
-                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(200,168,78,0.15)", borderRadius: "12px", padding: "14px", cursor: "pointer" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(200,168,78,0.15)", borderRadius: "12px", padding: "14px", cursor: "pointer", position: "relative" }}>
+                  <button
+                    onClick={function (ev) {
+                      ev.stopPropagation();
+                      const nm = (game.teams && game.teams.length === 2)
+                        ? (game.teams[0].name + " vs " + game.teams[1].name)
+                        : "this game";
+                      deleteGame(game.id, nm + "  ·  " + game.date);
+                    }}
+                    title="Delete this game"
+                    style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(220,60,60,0.12)", color: "#e08080",
+                             border: "1px solid rgba(220,60,60,0.35)", borderRadius: "8px", width: "30px", height: "30px",
+                             fontSize: "15px", lineHeight: 1, cursor: "pointer", padding: 0, zIndex: 2 }}>
+                    &times;
+                  </button>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", paddingRight: "34px" }}>
                     <div style={{ fontSize: "11px", color: "#6a7a8a" }}>{game.date} at {game.time}</div>
                     <div style={{ fontSize: "10px", color: "#4a5a6a" }}>{game.totalRounds} rounds</div>
                   </div>
