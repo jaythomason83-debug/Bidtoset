@@ -509,6 +509,70 @@ const DEFAULT_SETTINGS = {
   scoringVersion: SCORING_VERSION,
 };
 
+// ─── Roster ───────────────────────────────────────────────────────────────────
+// The saved pool of people who play at this table. Names are TYPED ONCE, here,
+// and picked from every game after. That is the whole point: Mekenzie was
+// entered as "Mek", "Mekenzie" and "Mekinzie" on her first night because four
+// blank fields invite a fresh spelling every time.
+
+const ROSTER_KEY = "spades_roster_v1";
+
+function loadRoster() {
+  try {
+    const raw = localStorage.getItem(ROSTER_KEY);
+    const a = raw ? JSON.parse(raw) : [];
+    return Array.isArray(a) ? a.filter(function (n) { return n && String(n).trim(); }) : [];
+  } catch (_) { return []; }
+}
+
+function saveRoster(list) {
+  try { localStorage.setItem(ROSTER_KEY, JSON.stringify(list)); } catch (_) {}
+}
+
+// Case-insensitive add. Never creates a second row for a name already present.
+function rosterAdd(list, name) {
+  const nm = String(name || "").trim();
+  if (!nm) return list;
+  const hit = list.some(function (x) { return String(x).toLowerCase() === nm.toLowerCase(); });
+  return hit ? list : list.concat([nm]);
+}
+
+function editDistance(a, b) {
+  a = String(a).toLowerCase(); b = String(b).toLowerCase();
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = [], cur = [];
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      cur[j] = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = cur.slice();
+  }
+  return prev[n];
+}
+
+// "Did you mean Mekenzie?" - catches both misspellings and shortenings.
+function nearMatch(name, list) {
+  const nm = String(name || "").trim();
+  if (nm.length < 3) return null;
+  const low = nm.toLowerCase();
+  for (let i = 0; i < list.length; i++) {
+    const other = String(list[i]);
+    const ol = other.toLowerCase();
+    if (ol === low) return null;                                   // exact, not a near match
+    if (ol.indexOf(low) === 0 || low.indexOf(ol) === 0) return other;   // Mek -> Mekenzie
+    // ONE character apart only. Distance 2 flagged "Robbie" as "Debbie" - a false
+    // positive on two real, different people, which is far worse than missing a
+    // typo. Mekinzie -> Mekenzie is distance 1 and still caught.
+    if (editDistance(low, ol) <= 1) return other;
+  }
+  return null;
+}
+
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -3176,6 +3240,13 @@ export default function App() {
   const [setupPlayerNames, setSetupPlayerNames] = useState(["", "", "", ""]);
   const [setupTeamNames, setSetupTeamNames] = useState(["", ""]);
   const [setupReuseDeclined, setSetupReuseDeclined] = useState(false);
+  const [roster, setRoster] = useState(loadRoster);
+  const [rosterNew, setRosterNew] = useState("");
+  const [rosterWarn, setRosterWarn] = useState(null);
+  const [rosterManual, setRosterManual] = useState(false);
+  const [rosterEdit, setRosterEdit] = useState(false);
+  const [rosterEditing, setRosterEditing] = useState(null);   // name currently being renamed
+  const [rosterEditVal, setRosterEditVal] = useState("");
   useEffect(function() {
     if (showSetup) {
       function splitTeam(t) {
@@ -3519,6 +3590,77 @@ export default function App() {
     upd(function(s) { return Object.assign({}, s, { activeBidSeat: order[0] }); });
   }
 
+  // Picking from the roster drives everything downstream: the four player slots,
+  // both team names, and gs.teams. Seating is cleared because it maps by NAME -
+  // leaving it behind after a roster change is how the trick prompt used to land
+  // on the wrong box.
+  function applyPicks(next) {
+    const four = [next[0] || "", next[1] || "", next[2] || "", next[3] || ""];
+    setSetupPlayerNames(four);
+    const t0 = four[0] && four[1] ? four[0] + " and " + four[1] : (four[0] || "Team 1");
+    const t1 = four[2] && four[3] ? four[2] + " and " + four[3] : (four[2] || "Team 2");
+    setSetupTeamNames([t0, t1]);
+    setSetupSeating({ N: null, S: null, E: null, W: null, dealer: null });
+    upd(function (st) {
+      const teams = [
+        Object.assign({}, st.teams[0], { name: t0, p: [four[0] || "Player 1", four[1] || "Player 2"] }),
+        Object.assign({}, st.teams[1], { name: t1, p: [four[2] || "Player 3", four[3] || "Player 4"] }),
+      ];
+      return Object.assign({}, st, { teams: teams });
+    });
+  }
+
+  // Tap a name: seat it in the first free slot, or un-seat it if already picked.
+  function togglePick(name) {
+    const cur = setupPlayerNames.slice();
+    const at = cur.findIndex(function (x) { return String(x).toLowerCase() === String(name).toLowerCase(); });
+    if (at >= 0) { cur[at] = ""; applyPicks(cur); return; }
+    const free = cur.findIndex(function (x) { return !x; });
+    if (free < 0) return;                      // four already picked
+    cur[free] = name;
+    applyPicks(cur);
+  }
+
+  function addToRoster(name) {
+    const nm = String(name || "").trim();
+    if (!nm) return;
+    const next = rosterAdd(roster, nm);
+    setRoster(next); saveRoster(next);
+    setRosterNew(""); setRosterWarn(null);
+    togglePick(nm);
+  }
+
+  // Rename a person everywhere at once: the pool, the four picked slots, the
+  // seating map and gs.teams. Missing any one of those is how teams and seating
+  // drift apart, which is the bug that sent the tricks prompt to the wrong box.
+  function renameInRoster(oldName, newNameRaw) {
+    const newName = String(newNameRaw || "").trim();
+    if (!newName || newName === oldName) { setRosterEditing(null); return; }
+    const clash = roster.some(function (x) {
+      return String(x).toLowerCase() === newName.toLowerCase() && String(x) !== oldName;
+    });
+    if (clash) { setRosterEditing(null); return; }   // already exists - nothing to do
+    const next = roster.map(function (x) { return x === oldName ? newName : x; });
+    setRoster(next); saveRoster(next);
+    const picks = setupPlayerNames.map(function (x) { return x === oldName ? newName : x; });
+    if (picks.join("|") !== setupPlayerNames.join("|")) applyPicks(picks);
+    setSetupSeating(function (prev) {
+      const sn = Object.assign({}, prev);
+      ["N", "E", "S", "W"].forEach(function (c) { if (sn[c] === oldName) sn[c] = newName; });
+      return sn;
+    });
+    setRosterEditing(null); setRosterEditVal("");
+  }
+
+  function removeFromRoster(name) {
+    const next = roster.filter(function (x) { return x !== name; });
+    setRoster(next); saveRoster(next);
+    if (setupPlayerNames.some(function (x) { return x === name; })) {
+      applyPicks(setupPlayerNames.map(function (x) { return x === name ? "" : x; }));
+    }
+    setRosterEditing(null);
+  }
+
   // ── Setup modal: commit seating to game state and start game ─────────────
   function commitSetup() {
     var gid = Date.now(), cloudId = genCloudId(), share = genShareCode();
@@ -3534,6 +3676,13 @@ export default function App() {
         archived: false,
       });
     });
+    // Whatever names actually started this game join the pool, so the next game
+    // is a tap instead of a retype - including names entered the manual way.
+    try {
+      var used = [setupSeating.N, setupSeating.E, setupSeating.S, setupSeating.W].filter(Boolean);
+      var grown = used.reduce(function (acc, n) { return rosterAdd(acc, n); }, roster);
+      if (grown.length !== roster.length) { setRoster(grown); saveRoster(grown); }
+    } catch (_) {}
     setShowSetup(false);
   }
 
@@ -3782,7 +3931,137 @@ export default function App() {
             {/* Step 1: Team Names */}
             {setupStep === 1 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                {gs.lastTable && !setupReuseDeclined && (
+                {/* ── Roster picker ─────────────────────────────────────── */}
+                {!rosterManual && (
+                <div style={{ background: "rgba(0,229,255,0.05)", border: "1px solid rgba(0,229,255,0.25)", borderRadius: "12px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: "18px", color: "#00e5ff", fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>Who's Playing?</div>
+                    <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "4px" }}>
+                      {(function () {
+                        const n = setupPlayerNames.filter(Boolean).length;
+                        return n === 0 ? "Tap four names — first two are Team 1"
+                             : n < 4   ? "Tap " + (4 - n) + " more"
+                                       : "Ready";
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* the four slots */}
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    {[0, 1, 2, 3].map(function (i) {
+                      const nm = setupPlayerNames[i];
+                      const t1 = i < 2;
+                      return (
+                        <div key={i} onClick={function () { if (nm) togglePick(nm); }}
+                          style={{ flex: 1, minWidth: 0, textAlign: "center", padding: "10px 4px", borderRadius: "8px", cursor: nm ? "pointer" : "default",
+                                   background: nm ? (t1 ? "rgba(200,168,78,0.18)" : "rgba(0,191,255,0.15)") : "rgba(255,255,255,0.05)",
+                                   border: "1px dashed " + (nm ? "transparent" : "rgba(255,255,255,0.2)") }}>
+                          <div style={{ fontSize: "9px", color: "#7a9ab8", letterSpacing: "1px" }}>{t1 ? "TEAM 1" : "TEAM 2"}</div>
+                          <div style={{ fontSize: "13px", color: nm ? "#e8dcc8" : "#4a5a6a", fontWeight: nm ? "bold" : "normal", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {nm || "—"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* the pool */}
+                  {roster.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                      {roster.map(function (nm) {
+                        const picked = setupPlayerNames.some(function (x) { return String(x).toLowerCase() === String(nm).toLowerCase(); });
+                        const full = setupPlayerNames.filter(Boolean).length >= 4;
+                        if (rosterEdit && rosterEditing === nm) {
+                          return (
+                            <div key={nm} style={{ display: "flex", gap: "6px", alignItems: "center", width: "100%" }}>
+                              <input type="text" autoFocus value={rosterEditVal}
+                                onChange={function (ev) { setRosterEditVal(ev.target.value); }}
+                                onKeyDown={function (ev) { if (ev.key === "Enter") renameInRoster(nm, rosterEditVal); if (ev.key === "Escape") setRosterEditing(null); }}
+                                style={{ flex: 1, minWidth: 0, background: "rgba(255,255,255,0.09)", border: "1px solid " + GOLD, borderRadius: "8px", padding: "9px 12px", fontSize: "14px", color: "#e8dcc8", outline: "none" }} />
+                              <button onClick={function () { renameInRoster(nm, rosterEditVal); }}
+                                style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "8px", padding: "9px 13px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>Save</button>
+                              <button onClick={function () { removeFromRoster(nm); }}
+                                style={{ background: "rgba(220,60,60,0.15)", color: "#e08080", border: "1px solid rgba(220,60,60,0.45)", borderRadius: "8px", padding: "9px 13px", fontSize: "13px", cursor: "pointer" }}>Remove</button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button key={nm}
+                            onClick={function () {
+                              if (rosterEdit) { setRosterEditing(nm); setRosterEditVal(nm); }
+                              else { togglePick(nm); }
+                            }}
+                            disabled={!rosterEdit && !picked && full}
+                            style={{ background: rosterEdit ? "rgba(255,255,255,0.07)" : (picked ? GOLD : "rgba(255,255,255,0.07)"),
+                                     color: rosterEdit ? "#c8d8e8" : (picked ? "#0a0e1b" : (!picked && full ? "#4a5a6a" : "#c8d8e8")),
+                                     border: "1px " + (rosterEdit ? "dashed " + GOLD : "solid " + (picked ? GOLD : "rgba(255,255,255,0.18)")),
+                                     borderRadius: "999px", padding: "9px 15px", fontSize: "14px",
+                                     fontWeight: (!rosterEdit && picked) ? "bold" : "normal",
+                                     cursor: (!rosterEdit && !picked && full) ? "not-allowed" : "pointer" }}>
+                            {rosterEdit ? "\u270e " + nm : nm}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {roster.length > 0 && (
+                    <div style={{ textAlign: "right", marginTop: "-4px" }}>
+                      <button onClick={function () { setRosterEdit(!rosterEdit); setRosterEditing(null); }}
+                        style={{ background: "transparent", color: rosterEdit ? GOLD : "#5a7a8a", border: "none", fontSize: "11px", cursor: "pointer", textDecoration: "underline", padding: "2px 0" }}>
+                        {rosterEdit ? "done editing" : "edit names"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* add someone new */}
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <input type="text" placeholder="Add a player…" value={rosterNew}
+                      onChange={function (ev) {
+                        const v = ev.target.value;
+                        setRosterNew(v);
+                        setRosterWarn(nearMatch(v, roster));
+                      }}
+                      onKeyDown={function (ev) { if (ev.key === "Enter" && rosterNew.trim() && !rosterWarn) addToRoster(rosterNew); }}
+                      style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "8px", padding: "11px 13px", fontSize: "14px", color: "#e8dcc8", outline: "none", minWidth: 0 }} />
+                    <button onClick={function () { addToRoster(rosterNew); }} disabled={!rosterNew.trim()}
+                      style={{ background: rosterNew.trim() ? "rgba(0,229,255,0.2)" : "rgba(255,255,255,0.06)", color: rosterNew.trim() ? "#00e5ff" : "#4a5a6a",
+                               border: "1px solid " + (rosterNew.trim() ? "rgba(0,229,255,0.5)" : "rgba(255,255,255,0.15)"), borderRadius: "8px", padding: "11px 16px", fontSize: "14px", fontWeight: "bold", cursor: rosterNew.trim() ? "pointer" : "not-allowed" }}>
+                      Add
+                    </button>
+                  </div>
+
+                  {/* the guard that stops Mek / Mekenzie / Mekinzie */}
+                  {rosterWarn && (
+                    <div style={{ background: "rgba(200,168,78,0.12)", border: "1px solid rgba(200,168,78,0.4)", borderRadius: "8px", padding: "11px 13px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "13px", color: GOLD, flex: 1, minWidth: "120px" }}>Did you mean <b>{rosterWarn}</b>?</span>
+                      <button onClick={function () { togglePick(rosterWarn); setRosterNew(""); setRosterWarn(null); }}
+                        style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "6px", padding: "7px 13px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}>
+                        Yes, use {rosterWarn}
+                      </button>
+                      <button onClick={function () { const nm = rosterNew; setRosterWarn(null); addToRoster(nm); }}
+                        style={{ background: "transparent", color: "#8aaabb", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "6px", padding: "7px 13px", fontSize: "12px", cursor: "pointer" }}>
+                        No, add anyway
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <button onClick={function () { setRosterManual(true); }}
+                      style={{ background: "transparent", color: "#5a7a8a", border: "none", fontSize: "11px", cursor: "pointer", textDecoration: "underline", padding: "4px 0" }}>
+                      type names instead
+                    </button>
+                    <div style={{ flex: 1 }} />
+                    <button onClick={function () { setSetupStep(2); }} disabled={setupPlayerNames.filter(Boolean).length !== 4}
+                      style={{ background: setupPlayerNames.filter(Boolean).length === 4 ? GOLD : "rgba(200,168,78,0.25)", color: "#0a0e1b", border: "none", borderRadius: "10px",
+                               padding: "13px 26px", fontSize: "15px", fontWeight: "bold", letterSpacing: "1px",
+                               cursor: setupPlayerNames.filter(Boolean).length === 4 ? "pointer" : "not-allowed" }}>
+                      Next →
+                    </button>
+                  </div>
+                </div>
+                )}
+
+                {rosterManual && gs.lastTable && !setupReuseDeclined && (
                   <div style={{ background: "rgba(200,168,78,0.08)", border: "1px solid rgba(200,168,78,0.3)", borderRadius: "12px", padding: "18px", display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: "18px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>Same Table?</div>
@@ -3831,13 +4110,13 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {(!gs.lastTable || setupReuseDeclined) && (
+                {rosterManual && (!gs.lastTable || setupReuseDeclined) && (
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: "20px", color: GOLD, fontWeight: "bold", fontVariant: "small-caps", letterSpacing: "2px" }}>New Game</div>
                   <div style={{ fontSize: "12px", color: "#7a9ab8", marginTop: "6px" }}>Enter your team names to get started</div>
                 </div>
                 )}
-                {(!gs.lastTable || setupReuseDeclined) && gs.teams.map(function(team, ti) {
+                {rosterManual && (!gs.lastTable || setupReuseDeclined) && gs.teams.map(function(team, ti) {
                   return (
                     <div key={ti} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                       <div style={{ fontSize: "11px", color: "#7a9ab8", letterSpacing: "1px", textTransform: "uppercase" }}>Team {ti + 1}</div>
@@ -3889,7 +4168,7 @@ export default function App() {
                     </div>
                   );
                 })}
-                {(!gs.lastTable || setupReuseDeclined) && (
+                {rosterManual && (!gs.lastTable || setupReuseDeclined) && (
                 <button
                   onClick={function() { setSetupStep(2); }}
                   style={{ background: GOLD, color: "#0a0e1b", border: "none", borderRadius: "10px", padding: "14px", fontSize: "15px", fontWeight: "bold", cursor: "pointer", letterSpacing: "1px", marginTop: "4px" }}>
