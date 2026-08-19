@@ -2814,6 +2814,11 @@ function bagPips(bags, limit) {
 function TVScoreboard({ code }) {
   const [d, setD] = React.useState(null);
   const [liveOverride, setLiveOverride] = React.useState(null);   // instant state via Realtime
+  // The 2s poll goes through the edge function, which builds `live` field by field
+  // and does NOT carry `secs`. Only the Realtime broadcast has it. Without a memory
+  // here the clock length flips back to the default every time the poll wins a
+  // render - the phone says 15 and the TV counts 25.
+  const seenSecs = React.useRef(null);
   const [audio, setAudio] = React.useState(null);
   const [audioAsked, setAudioAsked] = React.useState(false);
   const [muted, setMuted] = React.useState(false);
@@ -2871,6 +2876,7 @@ function TVScoreboard({ code }) {
       var p = msg && msg.payload;
       if (!p) return;
       if (p.sentAt) clockOffset.current = p.sentAt - Date.now();
+      if (p.live && (p.live.secs === 0 || p.live.secs)) seenSecs.current = p.live.secs;
       setLiveOverride(p.live ? Object.assign({}, p.live, { __game: gameId }) : null);
     });
     ch.subscribe();
@@ -2879,6 +2885,7 @@ function TVScoreboard({ code }) {
       // this the override outlives the game it came from and freezes the bid
       // strip on the old roster while the team panels move on.
       setLiveOverride(null);
+      seenSecs.current = null;
       try { supabase.removeChannel(ch); } catch (_) {}
     };
   }, [gameId]);
@@ -2912,7 +2919,10 @@ function TVScoreboard({ code }) {
   var timer = null;
   if (live && live.bidStartedAt && live.activeBidSeat !== null && live.activeBidSeat !== undefined) {
     var elapsedMs = (Date.now() + clockOffset.current) - live.bidStartedAt;
-    var secs = (live.secs === 0 || live.secs) ? live.secs : BID_SECONDS;
+    // live.secs -> last value any broadcast carried -> default. Never silently 25
+    // just because this render came from the poll instead of Realtime.
+    var secs = (live.secs === 0 || live.secs) ? live.secs
+             : ((seenSecs.current === 0 || seenSecs.current) ? seenSecs.current : BID_SECONDS);
     if (secs > 0) timer = { remaining: secs - (elapsedMs / 1000), key: live.activeBidSeat + ":" + live.bidStartedAt, secs: secs };
   }
   // Cue tones on each of the last 5 seconds, explosion at zero. Keyed on
