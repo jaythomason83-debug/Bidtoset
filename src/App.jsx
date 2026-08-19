@@ -506,6 +506,7 @@ const DEFAULT_SETTINGS = {
   bagLimit: 10,
   bagPenalty: -100,
   minBid: 2,
+  bidSeconds: 25,          // 0 = clock off
   scoringVersion: SCORING_VERSION,
 };
 
@@ -1696,26 +1697,40 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
   const [draft, setDraft] = React.useState(Object.assign({}, settings));
   const [showQR, setShowQR] = React.useState(false);
 
-  function Option({ label, field, options }) {
+  // `live` marks a setting that does NOT affect scoring, so it stays editable
+  // while a game is running. The rules lock exists to stop the maths changing
+  // mid-game; the bid clock is pacing, not maths.
+  function Option({ label, field, options, live, note }) {
+    const locked = gameStarted && !live;
     return (
       <div style={{ marginBottom: "16px" }}>
-        <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "8px" }}>{label}</div>
+        <div style={{ fontSize: "11px", color: "#8aaabb", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "8px" }}>
+          {label}{live && gameStarted ? <span style={{ color: "#5a8a6a", letterSpacing: "1px" }}> · changeable now</span> : null}
+        </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           {options.map(function(opt) {
             const active = draft[field] === opt.value;
             return (
-              <button key={opt.value} onClick={function() { if (!gameStarted) setDraft(function(d) { return Object.assign({}, d, { [field]: opt.value }); }); }}
-                style={{ flex: 1, minWidth: "60px", padding: "10px 6px", borderRadius: "8px", fontFamily: "Georgia, serif", fontSize: "12px", cursor: gameStarted ? "not-allowed" : "pointer", fontWeight: active ? "bold" : "normal",
+              <button key={opt.value} onClick={function() {
+                  if (locked) return;
+                  const nd = Object.assign({}, draft, { [field]: opt.value });
+                  setDraft(nd);
+                  // A live setting applies the moment it is tapped - no Save needed,
+                  // because Save is hidden once a game is under way.
+                  if (live && gameStarted) { onSave(nd); saveSettings(nd); }
+                }}
+                style={{ flex: 1, minWidth: "60px", padding: "10px 6px", borderRadius: "8px", fontFamily: "Georgia, serif", fontSize: "12px", cursor: locked ? "not-allowed" : "pointer", fontWeight: active ? "bold" : "normal",
                   background: active ? "rgba(200,168,78,0.2)" : "rgba(255,255,255,0.04)",
                   border: "1px solid " + (active ? GOLD : "rgba(255,255,255,0.12)"),
-                  color: active ? GOLD : gameStarted ? "#3a4a5a" : "#c0d0e0",
-                  opacity: gameStarted && !active ? 0.4 : 1,
+                  color: active ? GOLD : locked ? "#3a4a5a" : "#c0d0e0",
+                  opacity: locked && !active ? 0.4 : 1,
                 }}>
                 {opt.label}
               </button>
             );
           })}
         </div>
+        {note && <div style={{ fontSize: "10px", color: "#6a8a9a", marginTop: "6px", fontStyle: "italic" }}>{note}</div>}
       </div>
     );
   }
@@ -1755,6 +1770,12 @@ function SettingsScreen({ onClose, settings, onSave, gameStarted, onShowInstruct
         <Option label="Min Team Bid" field="minBid" options={[
           { label: "1 (off)", value: 1 }, { label: "2 (default)", value: 2 },
           { label: "3", value: 3 }, { label: "4", value: 4 },
+        ]} />
+        <Option label="Bid Clock" field="bidSeconds" live={true}
+          note="Resets on any bid activity. Off hides the clock and the buzzer entirely."
+          options={[
+          { label: "Off", value: 0 }, { label: "15s", value: 15 },
+          { label: "20s", value: 20 }, { label: "25s", value: 25 },
         ]} />
 
         {!gameStarted && (
@@ -2457,7 +2478,7 @@ function parseTvCode() {
 // 15 seconds per bid. The cue tones and the explosion are SYNTHESISED with Web
 // Audio (oscillators + a noise buffer) rather than shipped as audio files: no
 // licensing, no CDN, nothing to 404, and it adds ~0kb to the bundle.
-const BID_SECONDS = 25;
+const BID_SECONDS = 25;   // fallback only - rules.bidSeconds is the real value
 const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
 
 function makeBidAudio() {
@@ -2694,7 +2715,8 @@ function TVScoreboard({ code }) {
   var timer = null;
   if (live && live.bidStartedAt && live.activeBidSeat !== null && live.activeBidSeat !== undefined) {
     var elapsedMs = (Date.now() + clockOffset.current) - live.bidStartedAt;
-    timer = { remaining: BID_SECONDS - (elapsedMs / 1000), key: live.activeBidSeat + ":" + live.bidStartedAt };
+    var secs = (live.secs === 0 || live.secs) ? live.secs : BID_SECONDS;
+    if (secs > 0) timer = { remaining: secs - (elapsedMs / 1000), key: live.activeBidSeat + ":" + live.bidStartedAt, secs: secs };
   }
   // Cue tones on each of the last 5 seconds, explosion at zero. Keyed on
   // seat+start so a new bidder rearms everything, and the boom only fires if we
@@ -2829,7 +2851,7 @@ function TVScoreboard({ code }) {
     }
     if (!timer || done) return <div style={{ fontSize: "3.4vh", color: "#4a5a6a", fontVariant: "small-caps" }}>vs</div>;
     var rem = Math.max(0, timer.remaining);
-    var frac = Math.max(0, Math.min(1, rem / BID_SECONDS));
+    var frac = Math.max(0, Math.min(1, rem / ((timer && timer.secs) || BID_SECONDS)));
     var expired = timer.remaining <= 0;
     var col = expired ? RED : (rem <= 5 ? ORANGE : GOLD);
     var R = 44, C = 2 * Math.PI * R;
@@ -2961,7 +2983,7 @@ function TVScoreboard({ code }) {
         <div style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(6,9,20,0.95)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 6vw" }}>
           <div style={{ fontSize: "6vh", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.4vw" }}>♠ Enable the bid clock</div>
           <div style={{ fontSize: "2.5vh", color: "#8aaabb", fontFamily: "Arial, sans-serif", marginTop: "2vh", maxWidth: "60vw" }}>
-            {"The " + BID_SECONDS + "-second bid clock plays a countdown cue and a buzzer. Your TV will not play sound until you tap."}
+            {"The bid clock plays a countdown cue and a buzzer. Your TV will not play sound until you tap."}
           </div>
           <div style={{ display: "flex", gap: "2vw", marginTop: "5vh" }}>
             <button onClick={enableAudio} style={{ background: "#c8a84e", color: "#0a0e1b", border: "none", borderRadius: "1.2vh", padding: "2vh 4vw", fontSize: "2.8vh", fontWeight: "bold", cursor: "pointer", fontFamily: "Georgia, serif" }}>Turn sound on</button>
@@ -3192,6 +3214,9 @@ export default function App() {
       var armed = !!gs.bidArmed;
       var core = {
         armed: armed,
+        // The TV must run the SAME clock length the scorekeeper set. Absent means
+        // an older scorekeeper build, so the TV falls back to its own default.
+        secs: (rules.bidSeconds === 0 || rules.bidSeconds) ? rules.bidSeconds : BID_SECONDS,
         round: (gs.rounds ? gs.rounds.length : 0) + 1,
         dealerSeat: seatOf(seating[seating.dealer]),
         activeBidSeat: activeSeat,
@@ -3203,7 +3228,7 @@ export default function App() {
         bidClockKey.current = coreKey;
         bidClockAt.current = Date.now();
       }
-      payload = Object.assign({}, core, { bidStartedAt: (!armed || activeSeat === null) ? null : bidClockAt.current });
+      payload = Object.assign({}, core, { bidStartedAt: (!armed || activeSeat === null || !rules.bidSeconds) ? null : bidClockAt.current });
     }
     var js = payload ? bidClockKey.current : "null";
     if (js === lastLiveJson.current) return;
@@ -3818,7 +3843,7 @@ export default function App() {
                   style={{ width: "100%", background: "linear-gradient(160deg,rgba(200,168,78,0.22),rgba(200,168,78,0.08))", color: GOLD, border: "1px solid " + GOLD, borderRadius: "12px", padding: "14px", fontSize: "15px", fontWeight: "bold", letterSpacing: "1px", cursor: "pointer" }}>
                   ♠ CARDS ARE DEALT — START BIDDING
                   <div style={{ fontSize: "10px", color: "#c8d8e8", fontWeight: "normal", letterSpacing: "0.5px", marginTop: "4px" }}>
-                    Starts the {BID_SECONDS}s clock on {(gs.seating && gs.activeBidSeat) ? gs.seating[gs.activeBidSeat] : "the first bidder"}
+                    {(rules.bidSeconds || 0) > 0 ? "Starts the " + rules.bidSeconds + "s clock on " : "Bidding begins with "}{(gs.seating && gs.activeBidSeat) ? gs.seating[gs.activeBidSeat] : "the first bidder"}
                   </div>
                 </button>
               )}
