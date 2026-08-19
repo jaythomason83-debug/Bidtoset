@@ -492,18 +492,31 @@ function buildGameSummary(gs, rules) {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
+// Bumped whenever the scoring MATH changes, so a stored game is self-describing
+// and a stats query can tell which ruleset produced a given score.
+//   1 = original. A busted nil's tricks counted as bags but scored no points.
+//   2 = 2026-08-18. Standard rule adopted: a busted nil's tricks count as bags
+//       AND pay 1 point each on a made contract; a set team scores -10 x bid
+//       flat with no bag points, though the bags still count toward the penalty.
+const SCORING_VERSION = 2;
+
 const DEFAULT_SETTINGS = {
   winScore: 500,
   loseScore: -200,
   bagLimit: 10,
   bagPenalty: -100,
   minBid: 2,
+  scoringVersion: SCORING_VERSION,
 };
 
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw)) : Object.assign({}, DEFAULT_SETTINGS);
+    // scoringVersion is never restored from storage - the running code decides
+    // which rules it implements, so a stale saved value must not shadow it.
+    return raw
+      ? Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw), { scoringVersion: SCORING_VERSION })
+      : Object.assign({}, DEFAULT_SETTINGS);
   } catch (_) { return Object.assign({}, DEFAULT_SETTINGS); }
 }
 
@@ -543,7 +556,7 @@ function scoreTeam(e) {
   const b2 = p2nil ? 0 : (parseInt(e.p2bid) || 0);
   const teamBid = b1 + b2;
 
-  let pts = 0, bags = 0, lines = [], wasSet = false;
+  let pts = 0, bags = 0, nilBags = 0, lines = [], wasSet = false;
 
   [[p1nil, e.p1nil, t1], [p2nil, e.p2nil, t2]].forEach(function(arr) {
     const isNil = arr[0], state = arr[1], tricks = arr[2];
@@ -551,17 +564,30 @@ function scoreTeam(e) {
     const blind = state === 2;
     const val = blind ? 200 : 100;
     if (tricks === 0) { pts += val; lines.push((blind ? "Blind Nil" : "Nil") + " made +" + val); }
-    else { pts -= val; bags += tricks; lines.push((blind ? "Blind Nil" : "Nil") + " failed -" + val); }
+    else {
+      pts -= val;
+      bags += tricks;
+      nilBags += tricks;
+      // Spell out the bags a busted nil creates. They were invisible before, which
+      // made the bag counter look wrong - the tenth bag had nowhere to show itself.
+      lines.push((blind ? "Blind Nil" : "Nil") + " failed -" + val + " (+" + tricks + " bag" + (tricks !== 1 ? "s" : "") + ")");
+    }
   });
 
   if (!bothNil) {
     const bidTricks = (!p1nil ? t1 : 0) + (!p2nil ? t2 : 0);
     if (bidTricks >= teamBid) {
       const over = bidTricks - teamBid;
-      pts += teamBid * 10 + over;
+      // A busted nil's tricks are bags for the team, and a bag pays 1 point - but
+      // only on a contract the team actually made. Standard rule ("Failed Nil:
+      // takes bags" plus normal bag scoring).
+      pts += teamBid * 10 + over + nilBags;
       bags += over;
-      lines.push(over === 0 ? "Bid " + teamBid + " made" : "Bid " + teamBid + " +" + over + " bag" + (over !== 1 ? "s" : ""));
+      const shown = over + nilBags;
+      lines.push(shown === 0 ? "Bid " + teamBid + " made" : "Bid " + teamBid + " +" + shown + " bag" + (shown !== 1 ? "s" : ""));
     } else {
+      // Set: -10x bid flat. No bag points this round for anyone - though the
+      // busted nil's bags still count toward the -100 threshold.
       pts -= teamBid * 10;
       wasSet = true;
       lines.push("Bid " + teamBid + " SET (took " + bidTricks + ")");
@@ -2326,6 +2352,39 @@ function winVerb(name) {
   return /\s(and|&|\+)\s/i.test(String(name || "")) ? "win" : "wins";
 }
 
+// ── HOLD MY BEER, the morning after ────────────────────────────────────────
+// The bid-time banner fires off live_state. This is the payoff once the hand is
+// played out. Computed from event.teams[].players[], which the TV already
+// receives - no extra request, no edge function change.
+function hmbPayoff(ev) {
+  try {
+    if (!ev || !Array.isArray(ev.teams)) return null;
+    for (var i = 0; i < ev.teams.length; i++) {
+      var t = ev.teams[i];
+      var bid = t.bid || 0, trk = t.tricks || 0;
+      if (bid >= 11) {
+        return trk >= bid
+          ? { type: "heldMyBeer", headline: "HELD MY BEER", sub: t.name + " bid " + bid + " and made it", team: i }
+          : { type: "spilledIt", headline: "SPILLED IT", sub: t.name + " bid " + bid + ", took " + trk, team: i };
+      }
+    }
+    var best = null;
+    for (var k = 0; k < ev.teams.length; k++) {
+      var ps = ev.teams[k].players || [];
+      for (var m = 0; m < ps.length; m++) {
+        var pl = ps[m];
+        if (pl.nil) continue;
+        var pb = pl.bid || 0;
+        if (pb >= 6 && (!best || pb > best.bid)) best = { name: pl.name, bid: pb, tricks: pl.tricks || 0, team: k };
+      }
+    }
+    if (!best) return null;
+    return best.tricks >= best.bid
+      ? { type: "heldMyBeer", headline: "HELD MY BEER", sub: best.name + " bid " + best.bid + " solo and delivered", team: best.team }
+      : { type: "droppedIt", headline: "DROPPED THE BEER", sub: best.name + " bid " + best.bid + ", took " + best.tricks, team: best.team };
+  } catch (_) { return null; }
+}
+
 function parseTvCode() {
   try { return new URLSearchParams(window.location.search).get("tv") || null; } catch (_) { return null; }
 }
@@ -2493,9 +2552,12 @@ function TVScoreboard({ code }) {
         if (!alive) return;
         if (j && !j.error) {
           setD(j); setWaiting(false);
-          if (j.mode === "live" && j.event && j.event.banner && j.event.roundNumber !== lastBannerRound.current) {
+          var payoff = j.mode === "live" ? hmbPayoff(j.event) : null;
+          if (j.mode === "live" && j.event && (j.event.banner || payoff) && j.event.roundNumber !== lastBannerRound.current) {
             lastBannerRound.current = j.event.roundNumber;
-            setBanner(j.event.banner);
+            // The payoff outranks whatever the server picked - somebody made a
+            // spectacle of themselves and the table wants to see how it ended.
+            setBanner(payoff || j.event.banner);
             if (bannerTimer.current) clearTimeout(bannerTimer.current);
             bannerTimer.current = setTimeout(function() { setBanner(null); }, 6500);
           }
@@ -2578,14 +2640,52 @@ function TVScoreboard({ code }) {
     var key = "tb:" + live.round + ":" + total;
     if (liveBannerKey.current === key) return;
     liveBannerKey.current = key;
-    if (total === 13) { setLiveBanner(null); return; }
+    // ── HOLD MY BEER ────────────────────────────────────────────────────
+    // Somebody just did something reckless. Measured over 70 real rounds:
+    // a solo bid of 6+ landed 4 times (~0.6/game), a team bid of 11+ once,
+    // and a team bid of 13 never - so all three tiers are wired, cheapest
+    // to rarest, and the rare ones cost nothing when they never fire.
+    var sts = live.seats || [];
+    function teamLabel(t) {
+      return sts.filter(function(x){ return x.team === t; })
+                .map(function(x){ return x.name; }).join(" & ");
+    }
+    var hmb = null;
+    for (var t = 0; t < 2 && !hmb; t++) {
+      var tt = live.totals[t] || 0;
+      if (tt === 13) hmb = { headline: "HOLD MY BEER", sub: teamLabel(t) + " bid ALL 13 — every book or bust" };
+      else if (tt >= 11) hmb = { headline: "HOLD MY BEER", sub: teamLabel(t) + " bid " + tt + " of 13" };
+    }
+    if (!hmb) {
+      var bold = null;
+      sts.forEach(function(x) {
+        var bv = (x.nil > 0) ? 0 : (x.bid || 0);
+        if (bv >= 6 && (!bold || bv > bold.bid)) bold = { name: x.name, bid: bv };
+      });
+      if (bold) hmb = { headline: "HOLD MY BEER", sub: bold.name + " bid " + bold.bid + " solo — half the deck, alone" };
+    }
     var short = 13 - total;
     // Keep the subline to ONE line or the pill grows and swallows the scores.
-    setLiveBanner(short > 0
+    var overbid = (total === 13) ? null : (short > 0
       ? { headline: "BAGS INCOMING", sub: total + " bid, 13 books — somebody's eating bags" }
       : { headline: "BID TO SET", sub: total + " bid, 13 books — somebody's going down" });
-    var t = setTimeout(function() { setLiveBanner(null); }, 7000);
-    return function() { clearTimeout(t); };
+    if (!hmb && !overbid) { setLiveBanner(null); return; }
+    // Both can be true at once. Show HOLD MY BEER first, then hand off - one
+    // banner slot, so they queue instead of fighting over it.
+    var timers = [];
+    if (hmb) {
+      setLiveBanner(hmb);
+      if (overbid) {
+        timers.push(setTimeout(function() { setLiveBanner(overbid); }, 5200));
+        timers.push(setTimeout(function() { setLiveBanner(null); }, 11400));
+      } else {
+        timers.push(setTimeout(function() { setLiveBanner(null); }, 7000));
+      }
+    } else {
+      setLiveBanner(overbid);
+      timers.push(setTimeout(function() { setLiveBanner(null); }, 7000));
+    }
+    return function() { timers.forEach(function(x){ clearTimeout(x); }); };
   }, [live ? live.round : null, live ? live.complete : false, live && live.totals ? live.totals.join(",") : ""]);
 
   if (d && d.mode === "recap") {
