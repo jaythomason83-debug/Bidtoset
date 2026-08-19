@@ -147,6 +147,41 @@ async function pushGameToCloud(gameRecord, rules, winnerIndex) {
 // swallowed exactly like the jsonb path; localStorage stays source of truth.
 // Idempotent: players on (owner_id,name); participants on (game_id,seat);
 // rounds on (game_id,round_number); round_players on (round_id,seat).
+// Push local games the cloud has never seen. Games recorded before cloud sync
+// existed - or during a spell when the archive silently failed - live only in
+// this phone's localStorage. Matched on (owner_id, client_id), so re-running is
+// safe and already-synced games are skipped.
+async function cloudBackfillHistory(rules, onProgress) {
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const user = u && u.user;
+    if (!user) return { ok: false, reason: "not signed in" };
+    const history = loadHistory();
+    if (!history.length) return { ok: true, pushed: 0, skipped: 0 };
+    const { data: existing, error } = await supabase.from("games")
+      .select("client_id").eq("owner_id", user.id);
+    if (error) return { ok: false, reason: error.message };
+    const have = {};
+    (existing || []).forEach(function (r) { if (r.client_id !== null && r.client_id !== undefined) have[String(r.client_id)] = true; });
+    const todo = history.filter(function (g) { return !have[String(g.id)]; });
+    var pushed = 0;
+    for (var i = 0; i < todo.length; i++) {
+      const g = todo[i];
+      // winner is stored as a team NAME locally; map it back to an index.
+      var wIdx = null;
+      if (g.teams && g.teams.length === 2) {
+        if (g.teams[0].name === g.winner) wIdx = 0;
+        else if (g.teams[1].name === g.winner) wIdx = 1;
+      }
+      if (typeof g.winner === "number") wIdx = g.winner;
+      await pushGameToCloud(g, (g.rules || rules), wIdx);
+      pushed++;
+      if (onProgress) onProgress(pushed, todo.length);
+    }
+    return { ok: true, pushed: pushed, skipped: history.length - todo.length };
+  } catch (e) { return { ok: false, reason: (e && e.message) || "failed" }; }
+}
+
 async function pushRelationalGame(gameId, ownerId, gameRecord, rules) {
   try {
     const teams = gameRecord.teams;
@@ -163,16 +198,14 @@ async function pushRelationalGame(gameId, ownerId, gameRecord, rules) {
     if (uniqNames.length !== 4) return; // duplicate names would collapse seats/participants
 
     // 1) players — upsert by name, map name -> id
-    const { data: pRows } = await supabase.from("players")
-      .upsert(uniqNames.map(function(n){ return { owner_id: ownerId, name: n }; }),
-              { onConflict: "owner_id,name" })
-      .select("id,name");
-    if (!pRows) return;
+    // players has UNIQUE (owner_id, lower(name)). Upserting on the CASE-SENSITIVE
+    // index throws the moment a differently-cased row exists - "Robbie" against a
+    // stored "robbie" - and the whole archive silently aborts. Same resolver the
+    // live path uses, matched on lower(name).
+    const seatToPlayerId = await cloudResolveSeatPlayerIds(ownerId, seatDefs);
+    if (!seatToPlayerId) return;
     const idByName = {};
-    pRows.forEach(function(r){ idByName[r.name] = r.id; });
-    if (seatDefs.some(function(s){ return !idByName[s.name]; })) return;
-    const seatToPlayerId = {};
-    seatDefs.forEach(function(s){ seatToPlayerId[s.seat] = idByName[s.name]; });
+    seatDefs.forEach(function(sd){ idByName[sd.name] = seatToPlayerId[sd.seat]; });
 
     // 2) game_participants (4 rows)
     await supabase.from("game_participants").upsert(
@@ -1469,9 +1502,21 @@ function GameSummaryCard({ gs, rules, onDismiss }) {
 
 // ─── History Screen ───────────────────────────────────────────────────────────
 
-function HistoryScreen({ onClose, onReset }) {
+function HistoryScreen({ onClose, onReset, rules }) {
   const [history, setHistory] = useState(loadHistory);
   const [selected, setSelected] = useState(null);
+  const [sync, setSync] = useState(null);   // {state, msg}
+
+  async function runBackfill() {
+    setSync({ state: "run", msg: "Checking the cloud…" });
+    const r = await cloudBackfillHistory(rules, function (done, total) {
+      setSync({ state: "run", msg: "Uploading " + done + " of " + total + "…" });
+    });
+    if (!r.ok) { setSync({ state: "err", msg: "Could not sync — " + r.reason }); return; }
+    setSync({ state: "ok", msg: r.pushed
+      ? ("Uploaded " + r.pushed + " game" + (r.pushed === 1 ? "" : "s") + " · " + r.skipped + " already there")
+      : "Everything on this device is already in the cloud" });
+  }
 
   function clearHistory() {
     if (window.confirm("Clear all game history? This cannot be undone.")) {
@@ -1489,6 +1534,26 @@ function HistoryScreen({ onClose, onReset }) {
     setHistory(next);
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch (_) {}
     if (selected === id) setSelected(null);
+  }
+
+  function SyncRow() {
+    return (
+      <div style={{ marginBottom: "16px" }}>
+        <button onClick={runBackfill} disabled={sync && sync.state === "run"}
+          style={{ width: "100%", background: "rgba(0,229,255,0.08)", border: "1px solid rgba(0,229,255,0.3)", borderRadius: "10px",
+                   padding: "12px", fontSize: "12px", fontFamily: "Georgia, serif", color: "#00e5ff",
+                   letterSpacing: "1px", cursor: (sync && sync.state === "run") ? "wait" : "pointer" }}>
+          {(sync && sync.state === "run") ? sync.msg : "\u2601 Sync this device's games to the cloud"}
+        </button>
+        {sync && sync.state !== "run" && (
+          <div style={{ fontSize: "11px", marginTop: "6px", textAlign: "center",
+                        color: sync.state === "err" ? ORANGE : "#7ac77a" }}>{sync.msg}</div>
+        )}
+        <div style={{ fontSize: "9px", color: "#5a6a7a", marginTop: "6px", textAlign: "center", fontStyle: "italic" }}>
+          Games this phone recorded before cloud sync existed only live here. Uploading adds them to career stats. Already-synced games are skipped.
+        </div>
+      </div>
+    );
   }
 
   if (selected) {
@@ -1559,6 +1624,8 @@ function HistoryScreen({ onClose, onReset }) {
             <button onClick={clearHistory} style={{ background: "transparent", border: "1px solid rgba(224,92,92,0.3)", borderRadius: "8px", padding: "8px 14px", color: RED, cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "10px" }}>Clear All</button>
           </div>
         </div>
+
+        <SyncRow />
 
         {history.length === 0 ? (
           <div style={{ textAlign: "center", padding: "60px 20px" }}>
@@ -3876,7 +3943,7 @@ export default function App() {
 
   if (recapCode) return <RecapView code={recapCode} />;
   if (tvCode) return <TVScoreboard code={tvCode} />;
-  if (screen === "history") return <HistoryScreen onClose={function() { setScreen("game"); }} onReset={function() { setScreen("game"); reset(); }} />;
+  if (screen === "history") return <HistoryScreen rules={rules} onClose={function() { setScreen("game"); }} onReset={function() { setScreen("game"); reset(); }} />;
   if (screen === "settings") return <SettingsScreen onClose={function() { setScreen("game"); }} settings={rules} onSave={setRules} gameStarted={gs.rounds.length > 0} onShowInstructions={function() { setShowOnboarding(true); }} />;
   if (screen === "stats") return <StatsScreen onClose={function() { setScreen("game"); }} />;
 
