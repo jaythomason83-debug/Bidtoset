@@ -2589,10 +2589,16 @@ function TVScoreboard({ code }) {
       var p = msg && msg.payload;
       if (!p) return;
       if (p.sentAt) clockOffset.current = p.sentAt - Date.now();
-      setLiveOverride(p.live || null);
+      setLiveOverride(p.live ? Object.assign({}, p.live, { __game: gameId }) : null);
     });
     ch.subscribe();
-    return function() { try { supabase.removeChannel(ch); } catch (_) {} };
+    return function() {
+      // A new game means the previous game's broadcast is dead weight. Without
+      // this the override outlives the game it came from and freezes the bid
+      // strip on the old roster while the team panels move on.
+      setLiveOverride(null);
+      try { supabase.removeChannel(ch); } catch (_) {}
+    };
   }, [gameId]);
 
   var reelLen = (d && d.mode === "recap" && d.highlights) ? d.highlights.length : 0;
@@ -2609,7 +2615,18 @@ function TVScoreboard({ code }) {
   // Hook order has to be identical on every render - putting a hook after an
   // early return crashes the component the moment the mode changes.
   // Realtime wins when present (sub-100ms); the 2s poll seeds a TV joining late.
-  var live = liveOverride || ((d && d.live && d.live.seats) ? d.live : null);
+  // Realtime wins when present (sub-100ms) - but only while it still describes the
+  // game and round the poll is reporting. An override from a finished game, or one
+  // left behind by a round that has since been scored, is stale and must lose.
+  var polled = (d && d.live && d.live.seats) ? d.live : null;
+  var ovr = liveOverride;
+  if (ovr) {
+    var wrongGame = ovr.__game && d && d.gameId && ovr.__game !== d.gameId;
+    var expectRound = (d && typeof d.round === "number") ? d.round + 1 : null;
+    var wrongRound = (expectRound !== null && typeof ovr.round === "number" && ovr.round !== expectRound);
+    if (wrongGame || wrongRound || !ovr.seats) ovr = null;
+  }
+  var live = ovr || polled;
   var timer = null;
   if (live && live.bidStartedAt && live.activeBidSeat !== null && live.activeBidSeat !== undefined) {
     var elapsedMs = (Date.now() + clockOffset.current) - live.bidStartedAt;
