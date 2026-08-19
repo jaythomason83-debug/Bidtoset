@@ -1613,6 +1613,97 @@ function HistoryScreen({ onClose, onReset }) {
 
 // ─── Stats Screen ─────────────────────────────────────────────────────────────
 
+// ─── Career stats, straight from the database ────────────────────────────────
+// The cloud has every game every phone at the table has ever scored, with the
+// per-device aliases already resolved to one person. localStorage only ever had
+// this device's slice, which is why six phones showed six different histories.
+function CareerStats() {
+  const [rows, setRows] = React.useState(null);
+  const [pairs, setPairs] = React.useState([]);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(function () {
+    var alive = true;
+    (async function () {
+      try {
+        const a = await supabase.from("v_person_career")
+          .select("player,games,wins,win_pct,hands,avg_bid,exact_pct,bags,bags_per_hand,nils,nils_made,nil_pct")
+          .order("hands", { ascending: false });
+        if (!alive) return;
+        if (a.error) { setErr(a.error.message || "could not load"); return; }
+        setRows((a.data || []).filter(function (r) { return (r.hands || 0) > 0; }));
+        const b = await supabase.from("v_partnerships")
+          .select("partnership,games,wins,win_pct").order("games", { ascending: false });
+        if (alive && !b.error) setPairs(b.data || []);
+      } catch (e) { if (alive) setErr("offline"); }
+    })();
+    return function () { alive = false; };
+  }, []);
+
+  if (err) return (
+    <div style={{ background: "rgba(232,148,58,0.08)", border: "1px solid rgba(232,148,58,0.25)", borderRadius: "10px", padding: "14px", fontSize: "12px", color: ORANGE }}>
+      Career stats need a connection — {err}. This device's own history is still below.
+    </div>
+  );
+  if (rows === null) return (
+    <div style={{ textAlign: "center", padding: "24px", color: "#6a7a8a", fontSize: "12px" }}>Loading career stats…</div>
+  );
+  if (!rows.length) return null;
+
+  function Th(props) { return <th style={{ textAlign: props.a || "right", fontSize: "9px", color: "#7a9ab8", letterSpacing: "1px", fontWeight: "normal", padding: "0 4px 6px" }}>{props.children}</th>; }
+  function Td(props) { return <td style={{ textAlign: props.a || "right", fontSize: "12px", color: props.c || "#c0d0e0", padding: "7px 4px", borderTop: "1px solid rgba(255,255,255,0.05)", fontWeight: props.b ? "bold" : "normal" }}>{props.children}</td>; }
+
+  return (
+    <div style={{ marginBottom: "22px" }}>
+      <div style={{ fontSize: "11px", color: GOLD, letterSpacing: "2px", textTransform: "uppercase", marginBottom: "10px" }}>
+        Career · every phone, every game
+      </div>
+      <div style={{ overflowX: "auto", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(200,168,78,0.15)", borderRadius: "12px", padding: "12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <Th a="left">PLAYER</Th><Th>GP</Th><Th>W</Th><Th>WIN%</Th><Th>HANDS</Th><Th>EXACT%</Th><Th>BAGS/H</Th><Th>NIL</Th>
+          </tr></thead>
+          <tbody>
+            {rows.map(function (r) {
+              return (
+                <tr key={r.player}>
+                  <Td a="left" b={true} c="#e8dcc8">{r.player}</Td>
+                  <Td>{r.games}</Td>
+                  <Td>{r.wins}</Td>
+                  <Td c={r.win_pct >= 50 ? "#7ac77a" : "#c0d0e0"}>{r.win_pct === null ? "—" : r.win_pct + "%"}</Td>
+                  <Td>{r.hands}</Td>
+                  <Td c={GOLD} b={true}>{r.exact_pct === null ? "—" : r.exact_pct + "%"}</Td>
+                  <Td c={r.bags_per_hand >= 0.8 ? ORANGE : "#c0d0e0"}>{r.bags_per_hand === null ? "—" : r.bags_per_hand}</Td>
+                  <Td>{r.nils ? (r.nils_made + "/" + r.nils) : "—"}</Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div style={{ fontSize: "9px", color: "#5a6a7a", marginTop: "8px", fontStyle: "italic" }}>
+          EXACT% = hit the bid on the nose. BAGS/H = bags per biddable hand — lower is better.
+        </div>
+      </div>
+
+      {pairs.length > 0 && (
+        <div style={{ marginTop: "14px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px", padding: "12px" }}>
+          <div style={{ fontSize: "10px", color: "#7a9ab8", letterSpacing: "2px", marginBottom: "8px" }}>PARTNERSHIPS</div>
+          {pairs.map(function (p) {
+            return (
+              <div key={p.partnership} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <div style={{ fontSize: "12px", color: "#c8d8e8" }}>{p.partnership}</div>
+                <div style={{ fontSize: "12px", color: p.win_pct >= 50 ? "#7ac77a" : "#a8bccc" }}>
+                  {p.wins}-{p.games - p.wins} <span style={{ color: "#6a7a8a" }}>· {p.win_pct}%</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatsScreen({ onClose }) {
   const history = loadHistory();
   const players = buildPlayerStats(history);
@@ -1634,6 +1725,14 @@ function StatsScreen({ onClose }) {
           <div style={{ fontSize: "20px", color: GOLD, fontVariant: "small-caps", letterSpacing: "3px" }}>Player Stats</div>
           <div style={{ width: "60px" }} />
         </div>
+
+        <CareerStats />
+
+        {players.length > 0 && (
+          <div style={{ fontSize: "11px", color: "#7a9ab8", letterSpacing: "2px", textTransform: "uppercase", marginBottom: "10px" }}>
+            This device only
+          </div>
+        )}
 
         {players.length === 0 ? (
           <div style={{ textAlign: "center", color: "#4a5a6a", padding: "60px 20px" }}>
