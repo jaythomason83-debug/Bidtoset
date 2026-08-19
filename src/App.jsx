@@ -126,7 +126,10 @@ async function pushGameToCloud(gameRecord, rules, winnerIndex) {
       ended_at: new Date().toISOString(),
       total_rounds: gameRecord.totalRounds,
       teams: gameRecord.teams,
-      rounds: gameRecord.rounds,
+      // games.rounds (jsonb) is DEPRECATED and no longer written. rounds +
+      // round_players are the source of truth. The jsonb copy only ever filled
+      // in on the archive path, so it was present for ~40% of games and silently
+      // absent for the rest - a duplicate you cannot trust is worse than none.
       rules: rules || null,
       share_code: gameRecord.shareCode || null,
     }, { onConflict: "owner_id,client_id" }).select("id").single();
@@ -1531,7 +1534,7 @@ function HistoryScreen({ onClose, onReset }) {
                         {(parseInt(r.entry[i].p1bid || 0) + parseInt(r.entry[i].p2bid || 0) === 13 && r.results[i].pts > 0) && <div style={{ fontSize: "10px", color: "#00bfff", fontWeight: "bold", marginTop: "3px", textShadow: "0 0 8px rgba(0,191,255,0.6)" }}>BOSTON</div>}
                         {r.results[i].bags === 0 && r.results[i].pts > 0 && !r.results[i].wasSet && <div style={{ fontSize: "9px", color: "#c8a84e", fontStyle: "italic", marginTop: "2px", textShadow: "0 0 6px rgba(200,168,78,0.4)" }}>Clean Hand</div>}
                         {((parseInt(r.entry[i].p1bid||0) >= 5 && parseInt(r.entry[i].p1tricks||0) === 0) || (parseInt(r.entry[i].p2bid||0) >= 5 && parseInt(r.entry[i].p2tricks||0) === 0)) && <RenegadeIcon />}
-                        {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
+                        {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}{r.bagsRaw && r.bagsAfter ? " \u00b7 " + r.bagsRaw[i] + " bags \u2192 " + r.bagsAfter[i] : ""}</div>}
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                       </div>
                     );
@@ -2380,8 +2383,11 @@ async function cloudPushRound(cloudGameId, teams, round, newTeams) {
       team_0_bid: tBid(e0), team_1_bid: tBid(e1), team_0_tricks: t0, team_1_tricks: t1,
       team_0_score_delta: ((res[0] && res[0].pts) || 0) + (pen[0] || 0),
       team_1_score_delta: ((res[1] && res[1].pts) || 0) + (pen[1] || 0),
-      team_0_bags_after: (newTeams && newTeams[0] ? newTeams[0].bags : 0),
-      team_1_bags_after: (newTeams && newTeams[1] ? newTeams[1].bags : 0),
+      // round.bagsAfter is the truth for THIS round. newTeams is only a fallback
+      // for rounds recorded before bagsAfter existed - it holds the CURRENT count,
+      // which is wrong for any round pushed in a catch-up batch.
+      team_0_bags_after: (round.bagsAfter ? round.bagsAfter[0] : (newTeams && newTeams[0] ? newTeams[0].bags : 0)),
+      team_1_bags_after: (round.bagsAfter ? round.bagsAfter[1] : (newTeams && newTeams[1] ? newTeams[1].bags : 0)),
       team_0_bag_penalty_applied: pen[0] || 0, team_1_bag_penalty_applied: pen[1] || 0,
     };
     const { data: rRow } = await supabase.from("rounds").upsert([roundRow], { onConflict: "game_id,round_number" }).select("id").single();
@@ -3410,6 +3416,14 @@ export default function App() {
         results: results,
         after: newTeams.map(function(t) { return t.score; }),
         penalties: newTeams.map(function(t, i) { var b = s.teams[i].bags + results[i].bags; var p = 0; while (b >= rules.bagLimit) { b -= rules.bagLimit; p += rules.bagPenalty; } return p; }),
+        // Bag arithmetic for THIS round, recorded at the moment it happened.
+        // bagsBefore + earned = bagsRaw, which rolls over to bagsAfter.
+        // Without this the cloud stamped every round in a batch with whatever the
+        // live count happened to be, and the round card could not show the reset.
+        bagsBefore: s.teams.map(function(t) { return t.bags; }),
+        bagsEarned: results.map(function(r) { return r.bags; }),
+        bagsRaw: s.teams.map(function(t, i) { return t.bags + results[i].bags; }),
+        bagsAfter: newTeams.map(function(t) { return t.bags; }),
         snap: s.teams.map(function(t) { return { name: t.name, p: [t.p[0], t.p[1]] }; }),
         dealer: (s.seating && s.seating.dealer && s.seating[s.seating.dealer]) ? s.seating[s.seating.dealer] : null,
       };
@@ -3939,7 +3953,7 @@ export default function App() {
                                   return <div key={li} style={{ color: isBad ? ORANGE : isBlind ? BLUE : GREEN, fontSize: "10px" }}>{l}</div>;
                                 })}
                                 <div style={{ color: r.results[i].pts >= 0 ? GREEN : RED, fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{r.results[i].pts >= 0 ? "+" : ""}{r.results[i].pts} pts</div>
-                                {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}</div>}
+                                {r.penalties && r.penalties[i] !== 0 && <div style={{ color: RED, fontSize: "10px", fontWeight: "bold" }}>BAG PENALTY {r.penalties[i]}{r.bagsRaw && r.bagsAfter ? " \u00b7 " + r.bagsRaw[i] + " bags \u2192 " + r.bagsAfter[i] : ""}</div>}
                         <div style={{ color: "#d0e0f0", fontSize: "10px" }}>Score: {r.after[i]}</div>
                               </div>
                             );
