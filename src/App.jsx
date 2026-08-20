@@ -2610,6 +2610,13 @@ function broadcastLive(cloudGameId, raw) {
       var declared = seatsOut.filter(function(x) { return x.nil > 0 || x.bid !== null; }).length;
       shaped = { round: raw.round, seats: seatsOut, totals: totals, declared: declared,
                  complete: declared === 4, activeBidSeat: raw.activeBidSeat,
+                 // secs MUST ride along. The broadcast override BEATS the 2s poll,
+                 // so if this shape omits the clock length the TV throws away the
+                 // correct value the poll just delivered and falls back to its own
+                 // default on every keystroke. That is exactly why the TV showed 25
+                 // when the rule said 15, and then 20 when the rule said 15 - it was
+                 // never reading the setting at all, only the constant.
+                 secs: (raw.secs === 0 || raw.secs) ? raw.secs : null,
                  bidStartedAt: raw.bidStartedAt, armed: raw.armed !== false };
     }
     _liveChan.send({ type: "broadcast", event: "live", payload: { live: shaped, sentAt: Date.now() } });
@@ -2685,7 +2692,7 @@ const BID_SECONDS = 20;   // fallback only - rules.bidSeconds is the real value
 // Bump this whenever a build ships. The TV footer prints it, so "is that screen
 // running the current build?" stops being a guess. Three separate sessions were
 // lost to a stale bundle that looked identical to the current one.
-const BUILD_TAG = "2026-08-20b";
+const BUILD_TAG = "2026-08-20d";
 const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
 
 function makeBidAudio() {
@@ -2849,6 +2856,11 @@ function TVScoreboard({ code }) {
         if (!alive) return;
         if (j && !j.error) {
           setD(j); setWaiting(false);
+          // Seed the remembered clock length from the poll too. Previously this
+          // ref was only ever written by a broadcast, so a TV whose scorekeeper
+          // runs an older build - or that joined mid-round - had nothing to fall
+          // back to but the hardcoded default.
+          if (j.live && (j.live.secs === 0 || j.live.secs)) seenSecs.current = j.live.secs;
           var payoff = j.mode === "live" ? hmbPayoff(j.event) : null;
           if (j.mode === "live" && j.event && (j.event.banner || payoff) && j.event.roundNumber !== lastBannerRound.current) {
             lastBannerRound.current = j.event.roundNumber;
@@ -3393,6 +3405,11 @@ export default function App() {
       cloudDeleteRound(gs.cloudGameId, removed);
     }
   }, [gs.rounds ? gs.rounds.length : 0]);
+  // Declared HERE, above the live writer, and not further down where it used to
+  // live. The writer's dependency array is evaluated during render, so naming
+  // rules.bidSeconds in it while the useState sat below would throw a temporal
+  // dead zone ReferenceError on every single render.
+  const [rules, setRules] = useState(loadSettings);
   // Live cloud write: push bids to the TV as they're entered. Debounced to one
   // write per 400ms of quiet, and skipped entirely when nothing actually changed
   // (React re-renders far more often than the bid state does).
@@ -3459,10 +3476,15 @@ export default function App() {
     // gs.bidArmed MUST be in this list. Arming the clock is a state change with
     // no other observable effect, so without it React never re-runs the writer
     // and the countdown does not start until the first digit is typed.
-  }, [gs.entry, gs.seating, gs.activeBidSeat, gs.bidArmed, gs.cloudGameId, gs.winner, gs.rounds ? gs.rounds.length : 0]);
+    // rules.bidSeconds MUST be here too, for the same reason as gs.bidArmed.
+    // Bid Clock is a LIVE setting - changeable mid-game - but without this the
+    // writer never re-runs when it changes, so nothing is broadcast and nothing
+    // is pushed. The TV keeps serving the previous length until the next bid
+    // happens to fire the effect for some other reason. Changing the rule and
+    // watching the TV therefore looked completely dead.
+  }, [gs.entry, gs.seating, gs.activeBidSeat, gs.bidArmed, gs.cloudGameId, gs.winner, gs.rounds ? gs.rounds.length : 0, rules.bidSeconds]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [screen, setScreen] = useState("game");
-  const [rules, setRules] = useState(loadSettings);
   // Keep the live cloud game's rules in sync (house-rule win-score changes mid-game) so the TV progress bar tracks the real target.
   useEffect(function() {
     if (gs.cloudGameId && startedCloudGame.current === gs.cloudGameId) cloudUpdateRules(gs.cloudGameId, rules);
