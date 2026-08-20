@@ -2676,6 +2676,11 @@ function parseTvCode() {
 // Audio (oscillators + a noise buffer) rather than shipped as audio files: no
 // licensing, no CDN, nothing to 404, and it adds ~0kb to the bundle.
 const BID_SECONDS = 25;   // fallback only - rules.bidSeconds is the real value
+
+// Bump this whenever a build ships. The TV footer prints it, so "is that screen
+// running the current build?" stops being a guess. Three separate sessions were
+// lost to a stale bundle that looked identical to the current one.
+const BUILD_TAG = "2026-08-20a";
 const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
 
 function makeBidAudio() {
@@ -3030,7 +3035,7 @@ function TVScoreboard({ code }) {
       <div style={container}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2vw", color: "#c8a84e", fontVariant: "small-caps", letterSpacing: "0.3vw", fontSize: "3vh" }}>♠ BidToSet</div>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#8aaabb", fontSize: "4vh", fontVariant: "small-caps", letterSpacing: "0.2vw" }}>Waiting for the next game…</div>
-        <div style={foot}>bidtoset.app · live scoreboard</div>
+        <div style={foot}>bidtoset.app · live scoreboard · build {BUILD_TAG}{timer && timer.secs ? " · clock " + timer.secs + "s" : (live && (live.secs === 0 || live.secs) ? " · clock " + live.secs + "s" : "")}</div>
       </div>
     );
   }
@@ -3251,7 +3256,7 @@ function TVScoreboard({ code }) {
         {strip && strip.deadWeight && stripItem("Dead Weight", strip.deadWeight.name + " " + strip.deadWeight.pct + "%", !strip.heavyLifter)}
         {strip && strip.bidLeader && stripItem("Bid leader", strip.bidLeader.name + " " + strip.bidLeader.made + "/" + strip.bidLeader.att, !(strip.heavyLifter || strip.deadWeight))}
       </div>
-      <div style={foot}>bidtoset.app · live scoreboard</div>
+      <div style={foot}>bidtoset.app · live scoreboard · build {BUILD_TAG}{timer && timer.secs ? " · clock " + timer.secs + "s" : (live && (live.secs === 0 || live.secs) ? " · clock " + live.secs + "s" : "")}</div>
     </div>
   );
 }
