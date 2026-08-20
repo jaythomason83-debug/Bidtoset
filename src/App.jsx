@@ -542,7 +542,12 @@ const DEFAULT_SETTINGS = {
   bagLimit: 10,
   bagPenalty: -100,
   minBid: 2,
-  bidSeconds: 25,          // 0 = clock off
+  // 20s, not 25s. The table asked for 15s after a night of slow bidding, but
+  // 15 has to cover BOTH the player deciding and the scorekeeper tapping it in.
+  // Too short is a worse failure than too long: a clock that expires mid-entry
+  // trains people to ignore it. 20 is the compromise. Anyone can still change it
+  // in House Rules - this is only what a fresh install starts with.
+  bidSeconds: 20,          // 0 = clock off
   scoringVersion: SCORING_VERSION,
 };
 
@@ -2675,12 +2680,12 @@ function parseTvCode() {
 // 15 seconds per bid. The cue tones and the explosion are SYNTHESISED with Web
 // Audio (oscillators + a noise buffer) rather than shipped as audio files: no
 // licensing, no CDN, nothing to 404, and it adds ~0kb to the bundle.
-const BID_SECONDS = 25;   // fallback only - rules.bidSeconds is the real value
+const BID_SECONDS = 20;   // fallback only - rules.bidSeconds is the real value
 
 // Bump this whenever a build ships. The TV footer prints it, so "is that screen
 // running the current build?" stops being a guess. Three separate sessions were
 // lost to a stale bundle that looked identical to the current one.
-const BUILD_TAG = "2026-08-20a";
+const BUILD_TAG = "2026-08-20b";
 const TICK_HZ = { 5: 440, 4: 523, 3: 622, 2: 740, 1: 880 };
 
 function makeBidAudio() {
